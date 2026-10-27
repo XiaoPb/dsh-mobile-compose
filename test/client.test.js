@@ -34,6 +34,12 @@ const CAPS_BODY = {
 
 const IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif'
 
+/** 伪 remote.commands.list 返回值：20 条（超出单页容量，验证自动分页）。 */
+const COMMANDS = Array.from({ length: 20 }, (_, i) => ({
+  name: 'cmd' + i,
+  description: '演示指令 ' + i,
+}))
+
 function setupDom() {
   const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://dsh.local/' })
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -191,7 +197,7 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
 
   const root = createRoot(container)
   await act(async () => {
-    root.render(React.createElement(plus.comp, { inputActions }))
+    root.render(React.createElement(plus.comp, { inputActions, sessionId: 'session-test' }))
   })
   await flush()
 
@@ -202,13 +208,12 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
   const dockEl = document.querySelector('.dmc-dock')
   assert.ok(dockEl, 'dock 面板已打开（对话框下方文档流内）')
-  assert.ok(dockEl.querySelector('.dmc-tabs'), 'tab 栏在场')
-  // caps 后 take-photo 在非安卓隐藏 → 3 个瓦片
+  // caps 后 take-photo 在非安卓隐藏 → 2 个动作瓦片（指令不再是动作瓦片，与指令同列）
   const tiles = Array.from(dockEl.querySelectorAll('.dmc-tile'))
-  assert.deepEqual(tiles.map((t) => t.getAttribute('data-dmc-action')), ['pick-image', 'pick-file', 'command'])
+  assert.deepEqual(tiles.map((t) => t.getAttribute('data-dmc-action')), ['pick-image', 'pick-file'])
   assert.ok(global.history.state && global.history.state['dsh-mobile-compose'], 'open 时压入 history 标记')
 
-  // 打开即自动隐蔽采集指令表
+  // 打开即加载指令（无 remote → DOM 采集兜底）
   await flush(420) // 采集轮询 + dismiss 收尾（60+140ms）
   assert.equal(commandClicks, 1, '打开面板即自动隐蔽采集（点原生按钮）')
 
@@ -224,15 +229,14 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   assert.equal(nativeInputClicks, 1, 'pick-file 动作程序化点击官方 input')
   assert.ok(document.querySelector('.dmc-dock') === null, 'pick-file 后面板关闭')
 
-  // 指令动作：切到指令页，采集结果渲染为选项瓦片（不弹原生列表）
+  // 指令与常用动作同列（不区分 tab）：重开面板后指令瓦片出现在同一宫格
   await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
-  await act(async () => {
-    document.querySelector('.dmc-tile[data-dmc-action="command"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  })
   const cmdTiles = Array.from(document.querySelectorAll('[data-dmc-command]'))
   const names = cmdTiles.map((b) => b.getAttribute('data-dmc-command'))
-  assert.deepEqual(names, ['compact', 'export', 'plan'], '指令列表已从原生菜单采集（别名）')
-  assert.ok(cmdTiles[0].querySelector('.dmc-tile-box svg'), '指令渲染为选项瓦片（带图标）')
+  assert.deepEqual(names, ['compact', 'export', 'plan'], '指令表已采集并渲染为选项瓦片')
+  assert.ok(cmdTiles[0].querySelector('.dmc-tile-box svg'), '指令瓦片带图标')
+  const allTiles = Array.from(document.querySelectorAll('.dmc-tile'))
+  assert.deepEqual(allTiles.slice(0, 2).map((t) => t.getAttribute('data-dmc-action')), ['pick-image', 'pick-file'], '常用动作排在最前')
 
   // 执行指令：官方裁决通道（setDraft('/x') + submit），面板关闭
   await act(async () => {
@@ -299,13 +303,58 @@ test('client bundle：能力协商失败时走内置默认集（不抛错、全�
   document.body.appendChild(dockHost2)
   const root = createRoot(container)
   await act(async () => {
-    root.render(React.createElement(ctx.state.registered.find((r) => r.meta.id === 'dsh-mobile-compose-plus').comp))
+    root.render(React.createElement(ctx.state.registered.find((r) => r.meta.id === 'dsh-mobile-compose-plus').comp, { sessionId: 'session-test' }))
   })
   await act(async () => {
     document.querySelector('button[aria-label="添加内容"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
   // 拉取失败 → caps.ready=false → 全部 4 个动作按内置默认展示
   assert.equal(document.querySelectorAll('.dmc-tile').length, 4)
+  await act(async () => { root.unmount() })
+  dom.window.close()
+})
+
+test('client bundle：remote.commands.list 拉全量指令，超出容量自动分页（页码点）', async () => {
+  const dom = setupDom()
+  const loaded = loadClient()
+  const ctx = mockCtx()
+  const listed = []
+  loaded.mod.apply(ctx)
+
+  // 模拟官方 remote.commands 服务就绪：触发动态注入回调
+  const inject = ctx.state.dynamicInjects.find((d) => d.names.includes('remote.commands'))
+  assert.ok(inject, '声明了 remote.commands 动态注入')
+  inject.cb({
+    remote: { commands: { list: async (sid) => { listed.push(sid); return { ok: true, value: COMMANDS } } } },
+  })
+
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const dockHost = document.createElement('div')
+  dockHost.setAttribute('data-composer-dock', '')
+  document.body.appendChild(dockHost)
+
+  const root = createRoot(container)
+  await act(async () => {
+    root.render(React.createElement(ctx.state.registered[0].comp, { sessionId: 'session-test' }))
+  })
+  await act(async () => {
+    document.querySelector('button[aria-label="添加内容"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  await flush(120)
+
+  assert.deepEqual(listed, ['session-test'], '用 slot props 的 sessionId 调用官方 list RPC')
+  const tiles = Array.from(document.querySelectorAll('[data-dmc-command]'))
+  assert.ok(tiles.length > 0, '指令来自 RPC 全量表')
+  const pager = document.querySelector('.dmc-pager')
+  assert.ok(pager, '条目超出单页容量 → 出现页码点')
+  assert.ok(pager.querySelectorAll('.dmc-dot').length >= 2, '至少 2 页')
+  const page1 = tiles.map((t) => t.getAttribute('data-dmc-command'))
+  await act(async () => { pager.querySelectorAll('.dmc-dot')[1].dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+  const page2 = Array.from(document.querySelectorAll('[data-dmc-command]')).map((t) => t.getAttribute('data-dmc-command'))
+  assert.ok(page2.length > 0, '第 2 页有指令瓦片')
+  assert.notDeepEqual(page1, page2, '两页内容不同')
+
   await act(async () => { root.unmount() })
   dom.window.close()
 })

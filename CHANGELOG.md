@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+- **指令与技能全量接入官方 RPC**（不再依赖原生菜单能显示多少条）：
+  - 指令：`remote.commands.list(sessionId)`（包在 `sessions.using(...)` 会话保留上下文内，与官方 ui-commands 一致）；
+  - 技能：`remote.skills.list({sessionId})`（同官方 ui-skill）。
+  - 原生菜单 DOM 采集降级为**兜底 + 中文标签补全 + 官方顺序**来源；实测面板拿到 8 条指令 + 7 个技能 = 15 条，与官方 `/` 菜单完全一致。
+- **去掉「常用 / 指令」分页语义**：单一列表，常用动作在最前，指令/技能紧随其后；超出单页容量自动生成页码点（可点、可左右滑），不再用 tab 标签区分类型。
+- **每条指令专属图标**：文件 / 目标 / 计划 / 反馈 / 压缩 / 权限 / 模型 / 下载日志 各自独立 SVG，未知指令回退通用图标；技能使用独立图标。
+- **技能点选只插入草稿**：写入 `/技能名 ` 到聊天框（不提交），与官方 `/` 菜单行为一致；指令仍走 `setDraft('/x')` + `submit()` 裁决通道执行。
+- 打开面板即预取（RPC 就绪后自动重拉），`commands/change`、`plugin-manager/changed` 事件自动失效缓存。
+- 测试：22 项单测（新增 RPC 全量 + 自动分页用例）+ smoke + 无头 Chromium 真机验收全绿。
+
 ## 0.3.1
 
 - **修复「＋」点击无反应（hero 态）**：官方 `conversation.composer.dock` 插槽只在 `variant==="composer"` 时渲染，新建/空会话（hero 态）下面板组件根本不挂载。面板改为由「＋」入口组件内渲染并 portal 到官方 `[data-composer-dock]` 容器（hero / composer 两态都存在），不再依赖 dock 插槽。
