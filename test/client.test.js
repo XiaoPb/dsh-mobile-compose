@@ -369,6 +369,42 @@ test('client bundle：remote.commands.list 拉全量指令，超出容量自动�
   assert.ok(page2.length > 0, '第 2 页有指令瓦片')
   assert.notDeepEqual(page1, page2, '两页内容不同')
 
+  // ---- 上滑 / 下滑手势翻页（与左右滑并存） ----
+  const fireTouch = (el, type, x, y) => {
+    const ev = new window.Event(type, { bubbles: true, cancelable: true })
+    const point = { clientX: x, clientY: y, identifier: 1, target: el }
+    const list = type === 'touchend' || type === 'touchcancel' ? [] : [point]
+    Object.defineProperty(ev, 'touches', { value: list })
+    Object.defineProperty(ev, 'changedTouches', { value: [point] })
+    el.dispatchEvent(ev)
+  }
+  const dock = document.querySelector('.dmc-dock')
+  assert.ok(dock.classList.contains('dmc-swipe'), '多页时接管纵向手势（touch-action:none）')
+
+  // 当前在第 2 页：下滑 → 回第 1 页
+  await act(async () => {
+    fireTouch(dock, 'touchstart', 200, 240)
+    fireTouch(dock, 'touchend', 204, 320)
+  })
+  const afterSwipeDown = Array.from(document.querySelectorAll('[data-dmc-command]')).map((t) => t.getAttribute('data-dmc-command'))
+  assert.deepEqual(afterSwipeDown, page1, '下滑 → 上一页')
+
+  // 上滑 → 第 2 页
+  await act(async () => {
+    fireTouch(dock, 'touchstart', 200, 320)
+    fireTouch(dock, 'touchend', 198, 244)
+  })
+  const afterSwipeUp = Array.from(document.querySelectorAll('[data-dmc-command]')).map((t) => t.getAttribute('data-dmc-command'))
+  assert.deepEqual(afterSwipeUp, page2, '上滑 → 下一页')
+
+  // 位移不足阈值（<36px 纵向）不翻页
+  await act(async () => {
+    fireTouch(dock, 'touchstart', 200, 300)
+    fireTouch(dock, 'touchend', 200, 286)
+  })
+  const afterTinySwipe = Array.from(document.querySelectorAll('[data-dmc-command]')).map((t) => t.getAttribute('data-dmc-command'))
+  assert.deepEqual(afterTinySwipe, page2, '微小位移不翻页')
+
   await act(async () => { root.unmount() })
   dom.window.close()
 })
