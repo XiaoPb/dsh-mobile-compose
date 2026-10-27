@@ -39,6 +39,13 @@ test('payload：actions 开关透传、hideNativeButtons=false 透传', () => {
   assert.equal(takePhoto.enabled, true)
 })
 
+test('payload：hiddenCommands 透传到 commands.hidden', () => {
+  const body = buildCapabilitiesPayload({ hiddenCommands: ['file', 'model'] })
+  assert.deepEqual(body.commands.hidden, ['file', 'model'])
+  const empty = buildCapabilitiesPayload({})
+  assert.deepEqual(empty.commands.hidden, [], '缺省 = 不额外隐藏（客户端有自己的默认集）')
+})
+
 test('WebRoute 形状：exact + 官方 /api 路径族 + handler 函数', () => {
   const route = createCapabilitiesRoute({})
   assert.equal(route.kind, 'exact')

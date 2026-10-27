@@ -174,6 +174,7 @@ class DshComposeBridge {
 | `actions.take-photo` | `true` | 拍照动作开关（仅安卓运行时展示） |
 | `actions.pick-file` | `true` | 文件动作开关 |
 | `actions.command` | `true` | 指令动作开关 |
+| `hiddenCommands` | `file` | 不展示的指令名（逗号分隔）；`/file` 与图片/文件瓦片重复，默认剔除 |
 
 设置改动实时生效：客户端每次打开面板重拉 capabilities，无需刷新页面或重载插件。
 安卓端如需「管理员禁用相机」类策略，直接把 `actions.take-photo` 写进宿主侧

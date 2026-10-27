@@ -218,16 +218,28 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   assert.equal(commandClicks, 1, '打开面板即自动隐蔽采集（点原生按钮）')
 
   // 桌面端图片过滤：自带 input 用显式图片后缀（原始文件打开器按扩展名过滤）
-  const imageInput = dockEl.querySelector('input[data-dmc-input="true"][multiple]')
+  const imageInput = dockEl.querySelector('input[data-dmc-role="pick-image"]')
   assert.ok(imageInput, '图片动作自带 input 在面板内')
   assert.equal(imageInput.getAttribute('accept'), IMAGE_ACCEPT, 'accept 为显式图片后缀')
 
-  // pick-file：程序化点击官方 input（原始文件打开器，无过滤）
+  // 文件动作 = 原始 file：自带 input 不限后缀（accept 留空）
+  const fileInput = dockEl.querySelector('input[data-dmc-role="pick-file"]')
+  assert.ok(fileInput, '文件动作自带 input 在面板内')
+  assert.equal(fileInput.getAttribute('accept'), null, '文件动作不限后缀（= 原始 file）')
+
+  // pick-file：打开自带 input（不限后缀），选择期间面板保持挂载
+  let pickFileClicks = 0
+  fileInput.addEventListener('click', () => { pickFileClicks += 1 })
   await act(async () => {
     tiles.find((t) => t.getAttribute('data-dmc-action') === 'pick-file').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
-  assert.equal(nativeInputClicks, 1, 'pick-file 动作程序化点击官方 input')
-  assert.ok(document.querySelector('.dmc-dock') === null, 'pick-file 后面板关闭')
+  assert.equal(pickFileClicks, 1, 'pick-file 动作打开自带 input（全部后缀）')
+  assert.equal(nativeInputClicks, 0, '选择阶段不碰官方 input（回流时才注入）')
+  assert.ok(document.querySelector('.dmc-dock') !== null, '选择期间面板保持打开（卸载会取消文件对话框）')
+
+  // 面板仍开着：先收起再重开（入口按钮是开合开关）
+  await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+  assert.ok(document.querySelector('.dmc-dock') === null, '再次点击入口收起面板')
 
   // 指令与常用动作同列（不区分 tab）：重开面板后指令瓦片出现在同一宫格
   await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
@@ -235,15 +247,17 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   const names = cmdTiles.map((b) => b.getAttribute('data-dmc-command'))
   assert.deepEqual(names, ['compact', 'export', 'plan'], '指令表已采集并渲染为选项瓦片')
   assert.ok(cmdTiles[0].querySelector('.dmc-tile-box svg'), '指令瓦片带图标')
+  assert.equal(cmdTiles[0].querySelector('.dmc-tile-label').textContent, '压缩', '指令瓦片主标签为中文')
+  assert.equal(cmdTiles[0].querySelector('.dmc-tile-sub').textContent, '/compact', '斜杠别名为次行小字')
   const allTiles = Array.from(document.querySelectorAll('.dmc-tile'))
   assert.deepEqual(allTiles.slice(0, 2).map((t) => t.getAttribute('data-dmc-action')), ['pick-image', 'pick-file'], '常用动作排在最前')
 
-  // 执行指令：官方裁决通道（setDraft('/x') + submit），面板关闭
+  // 执行指令：采集来源没有 input 信息 → 一律按 claim 写草稿（不代发），面板关闭
   await act(async () => {
     cmdTiles.find((b) => b.getAttribute('data-dmc-command') === 'export').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
-  assert.deepEqual(draftWrites, ['/export'], '指令经官方 setDraft 写入')
-  assert.equal(submits, 1, '指令经官方 submit 提交')
+  assert.deepEqual(draftWrites, ['/export '], '指令写入草稿（claim，不代发）')
+  assert.equal(submits, 0, '采集来源的指令绝不直接提交')
   assert.ok(document.querySelector('.dmc-dock') === null, '指令执行后面板关闭')
   assert.ok(!document.querySelector('[role="listbox"]'), '原生菜单已收起（无残留）')
 
@@ -354,6 +368,79 @@ test('client bundle：remote.commands.list 拉全量指令，超出容量自动�
   const page2 = Array.from(document.querySelectorAll('[data-dmc-command]')).map((t) => t.getAttribute('data-dmc-command'))
   assert.ok(page2.length > 0, '第 2 页有指令瓦片')
   assert.notDeepEqual(page1, page2, '两页内容不同')
+
+  await act(async () => { root.unmount() })
+  dom.window.close()
+})
+
+test('client bundle：指令执行决策表（input→claim 不代发；裸指令→submit）+ 默认隐藏 /file + locale 中文', async () => {
+  const dom = setupDom()
+  const loaded = loadClient()
+  const ctx = mockCtx()
+  loaded.mod.apply(ctx)
+
+  // 官方 locale（command namespace）：内置指令的中文标签与 claim token
+  const localeInject = ctx.state.dynamicInjects.find((d) => d.names.includes('locale'))
+  assert.ok(localeInject, '声明了 locale 动态注入')
+  const zhDict = { 'label.goal': '目标', 'label.compact': '压缩', 'token.goal': '目标' }
+  localeInject.cb({ locale: { bind: (ns) => (key) => (ns === 'command' && key in zhDict ? zhDict[key] : key) } })
+
+  const inject = ctx.state.dynamicInjects.find((d) => d.names.includes('remote.commands'))
+  inject.cb({
+    remote: {
+      commands: {
+        list: async () => ({
+          ok: true,
+          value: [
+            { name: 'file', description: '文件（官方添加文件指令，与动作瓦片重复）' },
+            { name: 'goal', description: 'Set or view the goal', input: { hint: '目标内容' } },
+            { name: 'compact', description: 'Compact older conversation history' },
+          ],
+        }),
+      },
+    },
+  })
+
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const dockHost = document.createElement('div')
+  dockHost.setAttribute('data-composer-dock', '')
+  document.body.appendChild(dockHost)
+
+  const draftWrites = []
+  let submits = 0
+  const inputActions = { setDraft: (t) => draftWrites.push(t), submit: () => { submits += 1 } }
+
+  const root = createRoot(container)
+  await act(async () => {
+    root.render(React.createElement(ctx.state.registered[0].comp, { inputActions, sessionId: 'session-test' }))
+  })
+  await act(async () => {
+    document.querySelector('button[aria-label="添加内容"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  await flush(120)
+
+  // /file 与内置 图片/文件 瓦片同义 → 默认剔除，不渲染
+  assert.equal(document.querySelector('[data-dmc-command="file"]'), null, '默认隐藏 /file（与图片/文件动作重复）')
+
+  // 带 input 的指令 → claim：本地化 token 写入草稿，不提交（与原生菜单一致）
+  const goalTile = document.querySelector('[data-dmc-command="goal"]')
+  assert.equal(goalTile.querySelector('.dmc-tile-label').textContent, '目标', 'locale 中文标签')
+  assert.equal(goalTile.querySelector('.dmc-tile-sub').textContent, '/goal', '斜杠别名为次行小字')
+  await act(async () => { goalTile.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+  assert.deepEqual(draftWrites, ['/目标 '], 'claim 写入本地化 token（与原生菜单拼写一致）')
+  assert.equal(submits, 0, '带 input 的指令不代发')
+  assert.equal(document.querySelector('.dmc-dock'), null, '面板已关闭')
+
+  // 裸指令 → Enter 通道：setDraft('/x') + submit（官方分离执行）
+  await act(async () => {
+    document.querySelector('button[aria-label="添加内容"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+  const compactTile = document.querySelector('[data-dmc-command="compact"]')
+  assert.equal(compactTile.querySelector('.dmc-tile-label').textContent, '压缩', 'locale 中文标签（compact）')
+  await act(async () => { compactTile.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+  assert.deepEqual(draftWrites, ['/目标 ', '/compact'], '裸指令按裸 token 提交')
+  assert.equal(submits, 1, '裸指令经官方 submit 分离执行')
 
   await act(async () => { root.unmount() })
   dom.window.close()

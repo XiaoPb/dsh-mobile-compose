@@ -2,7 +2,7 @@
 
 DSH 网页界面插件：**手机端输入体验** —— 把输入框左下角的「添加文件」「调用指令」收编为一个「＋」入口，点击弹出 **QQ 式动作面板**（手机宽度：底部滑出宫格 + 蒙层 + 返回键关闭；桌面宽度：锚点弹层）。面板动作按**文件来源细分**（相册 / 拍照 / 文档 / 指令），为安卓专门路由预留标准缝；选中的文件全部回流**官方上传通道**（校验 / 上传 / 附件预览零重复）。
 
-当前版本 0.3.x：**指令接管**（原生命令菜单的列表收编进面板「指令」tab，执行走官方裁决通道）、**多 tab 左右滑**、**面板 dock 化**（插在对话框下方文档流内，不重叠）、**DSH 设置页配置项**（动作开关 / 隐藏原生按钮，改动实时生效）与**安卓端对接契约**（[docs/android-bridge.md](docs/android-bridge.md)）。
+当前版本 0.5.x：**指令/技能全量接入官方 RPC**（单列表自动分页、每条指令专属图标、中文标签来自官方 locale）、**执行决策表对齐原生菜单**（带参数的指令只写草稿不代发；裸指令走官方 Enter 通道分离执行）、**面板 dock 化且独占一行**（不与进度等条目挤兑）、**DSH 设置页配置项**（动作开关 / 隐藏原生按钮 / 隐藏指令，改动实时生效）与**安卓端对接契约**（[docs/android-bridge.md](docs/android-bridge.md)）。
 
 ## 职责划分：插件做什么，外部做什么
 
@@ -10,8 +10,8 @@ DSH 网页界面插件：**手机端输入体验** —— 把输入框左下角�
 |---|---|---|
 | 输入框「＋」入口、动作面板 UI、动画、返回键关闭 | **插件** | 全部走官方插槽（`conversation.input.left` + `conversation.composer.dock`），零 DOM 注入 |
 | 动作注册表与来源标记（gallery/camera/document/internal） | **插件** | 面板宫格的单一事实来源 |
-| 指令菜单接管 | **插件** | 「指令」tab 内嵌指令列表（首次从原生菜单隐蔽采集名称+描述）；执行走官方 `setDraft('/x') + submit()` 裁决通道；采集失败回退原生菜单点选 |
-| 桌面端文件选取 | **插件** | 图片动作对接**原始文件打开器**并附**显式图片后缀过滤**（`image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif`）；文件动作程序化点击官方 input（无过滤） |
+| 指令接管 | **插件** | 指令/技能目录来自官方 RPC（`remote.commands.list` / `remote.skills.list`），中文标签来自官方 locale + 原生菜单采集兜底；执行按**官方 dispatch 决策表**：带 `input` 的指令只把 `/token ` 写进草稿（用户补参数后自行发送），裸指令走 `setDraft('/x')+submit()` 官方 Enter 通道 |
+| 桌面端文件选取 | **插件** | 图片 / 文件都是同一个 file 输入的两个视图：图片附**显式图片后缀过滤**（`image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif`）；文件**不限后缀**（= 原始 file，处理全部类型） |
 | 文件回流与上传 | **插件** | DataTransfer 注入官方隐藏 input → 官方 onPickFiles → addFiles 校验/上传/预览 |
 | 动作能力协商 | **插件（宿主）** | `GET /api/dsh-mobile-compose/capabilities`，实时反映设置页配置 |
 | 面板配置 UI | **插件（宿主）** | DSH 设置页 `dsh-mobile-compose` namespace，schema-form 自动渲染 |
@@ -34,10 +34,10 @@ dsh plugin --profile web add /path/to/dsh-mobile-compose
 ## 桌面端验证清单
 
 1. 宽窗口点击「＋」→ **对话框卡片正下方**展开 dock 面板（文档流内，不遮挡任何内容）；「＋」位于工具行**最左**（原「添加文件」的位置）；
-2. 面板顶部「常用 / 指令」两个 tab：宫格列数随面板宽度自适应；触摸左右滑动可切换 tab；
+2. 单一列表：常用动作在最前，指令/技能紧随其后；宫格列数随面板宽度自适应，放不下自动生成页码点（可点、可左右滑）；
 3. 「图片」→ 原生文件打开器弹出且**默认过滤到图片类型**（显式后缀 accept）；选 1-2 张 → 附件预览条出现、走官方上传（进度 / receipt）；
-4. 「文件」→ 原生文件打开器（无类型过滤）；
-5. 「指令」→ 切到「指令」tab，首次自动从原生命令菜单**隐蔽采集**指令列表（不弹原生列表）；点任一指令 → 官方裁决通道执行（等价于输入 `/指令` 回车）；
+4. 「文件」→ 原生文件打开器（不限后缀，即原始 file）；
+5. 指令瓦片与动作同列：RPC 全量目录 + 中文主标签 + `/别名` 次行小字；点带参数的指令（如 /goal）→ 只插入 `/目标 ` 到聊天框（**不发送**，与原生菜单一致）；点裸指令（如 /compact）→ 官方 Enter 通道分离执行；
 6. 把窗口缩到 <700px（或 DevTools 设备模拟）→ 变为底部滑出面板，蒙层点击 / Esc / 系统返回键均可关闭；
 7. 设置页 → Plugins → dsh-mobile-compose：关掉任一动作 → 不重载页面，再点「＋」该瓦片已消失。
 
@@ -48,14 +48,14 @@ web GUI ──▶ __ModuleLoader__ 装载 lib/client.js（closure factory，形�
    ├─ ctx.slots 注册 conversation.input.left ←「＋」入口（flex order 最左 = 原生两键原位置）
    ├─ ctx.slots 注册 conversation.composer.dock ← 动作面板（对话框下方文档流内；
    │    手机宽度切换为 portal 底部滑出面板 + 蒙层）
-   ├─ 面板 = 多 tab（常用 / 指令），触摸左右滑切换；宫格列数随宽度自适应
+   ├─ 面板 = 单一列表自动分页（页码点 + 左右滑）；宫格列数随宽度自适应
    ├─ 动作注册表：pick-image(相册) / take-photo(拍照) / pick-file(文档) / command(指令)
    │    每项带 source 标记（gallery/camera/document/internal）——安卓专门路由的缝
-   ├─ 指令接管：首次进入「指令」tab → 程序化打开原生命令菜单（visibility:hidden）
-   │    → 采集 [role=option] 的名称+描述 → 收起原生菜单；执行 = setDraft('/x')+submit()
+   ├─ 指令接管：RPC 全量目录为权威；原生菜单采集（visibility:hidden）仅补中文标签/顺序；
+   │    执行 = 官方 dispatch 决策表（input→claim 写草稿不代发；裸指令→setDraft+submit）
    │    （官方裁决通道）；采集失败回退原生菜单点选
    ├─ 桌面：图片动作 = 自带 input + 显式图片后缀 accept（原始文件打开器按类型过滤）；
-   │        文件动作 = 程序化点击官方 input
+   │        文件动作 = 自带 input、accept 留空（全部后缀，即原始 file）
    ├─ 文件回流：DataTransfer 注入官方隐藏 input[type=file] → 派发 change
    │    → 官方 onPickFiles → addFiles 校验/上传/预览全链路原样生效
    └─ 能力协商：每次打开面板拉取 GET /api/dsh-mobile-compose/capabilities（失败走内置默认集）
@@ -93,11 +93,12 @@ body.dmc-hide-native button:has(+ input[type="file"][multiple][hidden]:not([data
 | `actions.take-photo` | `true` | 拍照动作开关（仅安卓运行时展示） |
 | `actions.pick-file` | `true` | 文件动作开关 |
 | `actions.command` | `true` | 指令动作开关 |
+| `hiddenCommands` | `file` | 不展示的指令名（逗号分隔，不带斜杠）。`/file` 是官方「添加文件」指令，与图片/文件瓦片重复，默认剔除；清空 = 全部展示 |
 
 ## 验证
 
 ```sh
-npm test        # 单测（node:test，21 项：config / capabilities / 宿主接线含设置页 / jsdom 客户端行为）
+npm test        # 单测（node:test，26 项：config / capabilities / 宿主接线含设置页 / jsdom 客户端行为）
 npm run smoke   # E2E 冒烟：真实 HTTP 往返 + 客户端产物形状 + patch 形状
 ```
 

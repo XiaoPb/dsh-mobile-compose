@@ -37,6 +37,15 @@ test('normalizeConfig：actions 局部覆盖，其余保持默认', () => {
   assert.ok(!('bogus-action' in cfg.actions), '未知动作 id 不应混入动作表')
 })
 
+test('normalizeConfig：hiddenCommands 默认剔除 /file，支持数组与逗号分隔字符串', () => {
+  assert.deepEqual(normalizeConfig().hiddenCommands, ['file'])
+  assert.deepEqual(normalizeConfig({ hiddenCommands: '/file, model' }).hiddenCommands, ['file', 'model'])
+  assert.deepEqual(normalizeConfig({ hiddenCommands: ['FILE', '/Compact'] }).hiddenCommands, ['file', 'compact'])
+  assert.deepEqual(normalizeConfig({ hiddenCommands: '' }).hiddenCommands, [], '空串 = 全部展示')
+  assert.deepEqual(normalizeConfig({ hiddenCommands: [] }).hiddenCommands, [], '空数组 = 全部展示')
+  assert.deepEqual(normalizeConfig({ hiddenCommands: 42 }).hiddenCommands, ['file'], '非法类型回落默认')
+})
+
 test('normalizeConfig：非法输入不抛错（宽容缺省契约）', () => {
   assert.doesNotThrow(() => normalizeConfig(null))
   assert.doesNotThrow(() => normalizeConfig('string'))
@@ -60,6 +69,16 @@ test('mergeSettingsSection：section 缺失/畸形时整体回落 base', () => {
     assert.equal(merged.hideNativeButtons, false)
     assert.deepEqual(merged.actions, base.actions)
   }
+})
+
+test('mergeSettingsSection：hiddenCommands 覆盖 base（设置页字符串）', () => {
+  const base = normalizeConfig({})
+  const merged = mergeSettingsSection(base, { hiddenCommands: 'file, model' })
+  assert.deepEqual(merged.hiddenCommands, ['file', 'model'])
+  const cleared = mergeSettingsSection(base, { hiddenCommands: '' })
+  assert.deepEqual(cleared.hiddenCommands, [], '设置页清空 = 全部展示')
+  const fallback = mergeSettingsSection(base, {})
+  assert.deepEqual(fallback.hiddenCommands, ['file'], 'section 缺失回落 base')
 })
 
 test('mergeSettingsSection：部分字段缺失逐字段回落', () => {
