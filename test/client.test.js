@@ -107,24 +107,23 @@ function mockCtx() {
 
 const flush = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms))
 
-/** 伪官方指令菜单（role=listbox + options），Escape 时自我移除（模拟真实 dismiss）。 */
+/** 伪官方指令菜单（0.2.1 结构：listbox + button[role=option]，span = [svg空, 中文标签, 别名, 描述]）。 */
 function installFakeNativeMenu() {
   const popup = document.createElement('div')
   popup.setAttribute('role', 'listbox')
-  const makeOption = (name, desc) => {
-    const item = document.createElement('div')
+  const makeOption = (label, name, desc) => {
+    const item = document.createElement('button')
     item.setAttribute('role', 'option')
-    const n = document.createElement('span')
-    n.textContent = name
-    const d = document.createElement('span')
-    d.textContent = desc
-    item.appendChild(n)
-    item.appendChild(d)
+    for (const text of ['', label, name, desc]) {
+      const s = document.createElement('span')
+      s.textContent = text
+      item.appendChild(s)
+    }
     return item
   }
-  popup.appendChild(makeOption('compact', 'Compact older conversation history'))
-  popup.appendChild(makeOption('export', 'Download this Session log as a ZIP archive'))
-  popup.appendChild(makeOption('plan', 'Enter or leave plan mode'))
+  popup.appendChild(makeOption('压缩', 'compact', 'Compact older conversation history'))
+  popup.appendChild(makeOption('下载日志', 'export', 'Download this Session log as a ZIP archive'))
+  popup.appendChild(makeOption('计划', 'plan', 'Enter or leave plan mode'))
   document.body.appendChild(popup)
   const onKey = (event) => {
     if (event.key === 'Escape') popup.remove()
@@ -145,13 +144,11 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   const ctx = mockCtx()
   loaded.mod.apply(ctx)
 
-  // ---- ② apply 接线：双插槽 ----
-  assert.deepEqual(ctx.state.injectCalls, ['conversation.input.left', 'conversation.composer.dock'])
-  assert.equal(ctx.state.registered.length, 2)
+  // ---- ② apply 接线：单插槽（面板由入口组件内渲染，不依赖 composer.dock 插槽）----
+  assert.deepEqual(ctx.state.injectCalls, ['conversation.input.left'])
+  assert.equal(ctx.state.registered.length, 1)
   const plus = ctx.state.registered.find((r) => r.meta.id === 'dsh-mobile-compose-plus')
-  const dock = ctx.state.registered.find((r) => r.meta.id === 'dsh-mobile-compose-dock')
   assert.equal(plus.meta.name, 'conversation.input.left')
-  assert.equal(dock.meta.name, 'conversation.composer.dock')
   assert.ok(document.getElementById('dsh-mobile-compose-style'), '面板样式已注入')
   assert.ok(document.getElementById('dsh-mobile-compose-hide'), 'hideNative 样式已注入')
   assert.ok(document.getElementById('dsh-mobile-compose-style').textContent.includes('order:-1'), '＋按钮站到工具行最左（原位替换）')
@@ -179,6 +176,11 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
 
   const fakeMenu = installFakeNativeMenu()
 
+  // 官方 dock 容器（面板 portal 目标；hero / composer 两态都存在）
+  const dockHost = document.createElement('div')
+  dockHost.setAttribute('data-composer-dock', '')
+  document.body.appendChild(dockHost)
+
   // 官方 session 标准件（指令执行通道）
   const draftWrites = []
   let submits = 0
@@ -189,10 +191,7 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
 
   const root = createRoot(container)
   await act(async () => {
-    root.render(React.createElement(React.Fragment, null,
-      React.createElement(plus.comp),
-      React.createElement(dock.comp, { inputActions }),
-    ))
+    root.render(React.createElement(plus.comp, { inputActions }))
   })
   await flush()
 
@@ -203,11 +202,15 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
   const dockEl = document.querySelector('.dmc-dock')
   assert.ok(dockEl, 'dock 面板已打开（对话框下方文档流内）')
-  assert.ok(dockEl.querySelector('.dmc-tabs'), 'tab 栏在场（常用/指令）')
+  assert.ok(dockEl.querySelector('.dmc-tabs'), 'tab 栏在场')
   // caps 后 take-photo 在非安卓隐藏 → 3 个瓦片
   const tiles = Array.from(dockEl.querySelectorAll('.dmc-tile'))
   assert.deepEqual(tiles.map((t) => t.getAttribute('data-dmc-action')), ['pick-image', 'pick-file', 'command'])
   assert.ok(global.history.state && global.history.state['dsh-mobile-compose'], 'open 时压入 history 标记')
+
+  // 打开即自动隐蔽采集指令表
+  await flush(420) // 采集轮询 + dismiss 收尾（60+140ms）
+  assert.equal(commandClicks, 1, '打开面板即自动隐蔽采集（点原生按钮）')
 
   // 桌面端图片过滤：自带 input 用显式图片后缀（原始文件打开器按扩展名过滤）
   const imageInput = dockEl.querySelector('input[data-dmc-input="true"][multiple]')
@@ -221,20 +224,19 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   assert.equal(nativeInputClicks, 1, 'pick-file 动作程序化点击官方 input')
   assert.ok(document.querySelector('.dmc-dock') === null, 'pick-file 后面板关闭')
 
-  // 指令动作：切到「指令」tab，采集原生菜单（不弹原生列表）
+  // 指令动作：切到指令页，采集结果渲染为选项瓦片（不弹原生列表）
   await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
   await act(async () => {
     document.querySelector('.dmc-tile[data-dmc-action="command"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
-  assert.equal(commandClicks, 1, '指令采集走原生按钮（隐蔽，不弹原生列表）')
-  await flush(320) // 采集定时器（60ms 首试 + 180ms 重试窗口）
-  const cmdButtons = Array.from(document.querySelectorAll('.dmc-cmd'))
-  const names = cmdButtons.map((b) => b.querySelector('.dmc-cmd-name').textContent)
-  assert.deepEqual(names, ['/compact', '/export', '/plan'], '指令列表已从原生菜单采集')
+  const cmdTiles = Array.from(document.querySelectorAll('[data-dmc-command]'))
+  const names = cmdTiles.map((b) => b.getAttribute('data-dmc-command'))
+  assert.deepEqual(names, ['compact', 'export', 'plan'], '指令列表已从原生菜单采集（别名）')
+  assert.ok(cmdTiles[0].querySelector('.dmc-tile-box svg'), '指令渲染为选项瓦片（带图标）')
 
   // 执行指令：官方裁决通道（setDraft('/x') + submit），面板关闭
   await act(async () => {
-    cmdButtons.find((b) => b.textContent.includes('/export')).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    cmdTiles.find((b) => b.getAttribute('data-dmc-command') === 'export').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
   assert.deepEqual(draftWrites, ['/export'], '指令经官方 setDraft 写入')
   assert.equal(submits, 1, '指令经官方 submit 提交')
@@ -292,12 +294,12 @@ test('client bundle：能力协商失败时走内置默认集（不抛错、全�
 
   const container = document.createElement('div')
   document.body.appendChild(container)
+  const dockHost2 = document.createElement('div')
+  dockHost2.setAttribute('data-composer-dock', '')
+  document.body.appendChild(dockHost2)
   const root = createRoot(container)
   await act(async () => {
-    root.render(React.createElement(React.Fragment, null,
-      React.createElement(ctx.state.registered.find((r) => r.meta.id === 'dsh-mobile-compose-plus').comp),
-      React.createElement(ctx.state.registered.find((r) => r.meta.id === 'dsh-mobile-compose-dock').comp),
-    ))
+    root.render(React.createElement(ctx.state.registered.find((r) => r.meta.id === 'dsh-mobile-compose-plus').comp))
   })
   await act(async () => {
     document.querySelector('button[aria-label="添加内容"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))

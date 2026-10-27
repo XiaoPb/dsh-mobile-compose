@@ -45,7 +45,7 @@ async function main() {
   assert.ok(clientSrc.includes('window.__ModuleLoader__.load'), 'client 必须是 __ModuleLoader__ closure factory')
   assert.ok(clientSrc.includes("id: '@xiaopb/dsh-mobile-compose'"), '加载 id 与包名一致')
   assert.ok(clientSrc.includes("'conversation.input.left'"), '注册官方输入行左侧插槽')
-  assert.ok(clientSrc.includes("'conversation.composer.dock'"), '注册官方对话框下方 dock 插槽（面板不重叠）')
+  assert.ok(clientSrc.includes("[data-composer-dock]"), '面板 portal 到官方 dock 容器（hero/composer 两态都在，不重叠）')
   assert.ok(clientSrc.includes('order:-1'), '＋按钮站到工具行最左（原位替换）')
   assert.ok(clientSrc.includes('dmc-cmds'), '指令 tab 接管（原生命令列表内嵌）')
   assert.ok(clientSrc.includes("inject = ['slots']"), '声明 slots 服务依赖')
