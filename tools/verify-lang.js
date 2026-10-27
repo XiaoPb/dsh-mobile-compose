@@ -1,8 +1,8 @@
 // 语言跟随验收：设置页切 English → 面板全英文单行；切回 中文 → 即时恢复
 const { chromium } = require('playwright')
+const { launchOptions } = require('./lib/browser')
 
 const URL = process.env.DSH_URL
-const EXE = process.env.LOCALAPPDATA + '\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe'
 
 async function openSettings(page) {
   // 中英文界面下 aria-label 不同，两者都试
@@ -46,7 +46,7 @@ const panelState = (page) => page.evaluate(() => {
 })
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, executablePath: EXE })
+  const browser = await chromium.launch(launchOptions())
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   const errs = []
   page.on('pageerror', (e) => errs.push(String(e).slice(0, 160)))

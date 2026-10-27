@@ -1,12 +1,10 @@
 /** 探测 0.2.1 原生指令菜单的真实 DOM 结构（程序化点击，绕过可见性检查）。 */
 const { chromium } = require('playwright')
+const { launchOptions } = require('./lib/browser')
 const URL = process.env.DSH_URL || 'http://127.0.0.1:3080/?token=Gs2-5f2IydDQY0hUT95ivSCb_6J2lQi9sahuLgAw8YI'
 
 async function main() {
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: process.env.LOCALAPPDATA + '\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe',
-  })
+  const browser = await chromium.launch(launchOptions())
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   page.on('pageerror', (e) => console.log('[pageerror]', String(e).slice(0, 200)))
   await page.goto(URL, { waitUntil: 'networkidle', timeout: 30000 })

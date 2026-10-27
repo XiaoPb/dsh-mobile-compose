@@ -3,15 +3,13 @@
  * ③ dock 面板独占一行（flex-wrap + order:-1，不与进度条挤兑）。
  */
 const { chromium } = require('playwright')
+const { launchOptions } = require('./lib/browser')
 
 const URL = process.env.DSH_URL
 if (!URL) { console.error('请设置 DSH_URL'); process.exit(1) }
 
 async function main() {
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: process.env.LOCALAPPDATA + '\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe',
-  })
+  const browser = await chromium.launch(launchOptions())
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   const logs = []
   page.on('pageerror', (err) => logs.push(`[pageerror] ${String(err).slice(0, 300)}`))

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.4
+
+**工程化版本，插件运行时行为无变化。**
+
+- **CI（`.github/workflows/ci.yml`）**：push main / PR 时在 Node 22 与 24 上跑 `npm run check`（28 项单测 + 离线冒烟 + 包清单 / patch / bundle 契约自检），再做 `npm pack` + 发布说明生成器校验 + **消费端安装测试**（把打出来的 tarball 装进干净目录，校验 `dsh.bundle.patch`、`dsh.client.platform`、宿主 `apply` 可加载、开发目录未混入包里）。
+- **Release（`.github/workflows/release.yml`）**：打 `v*` tag 或手动触发 → 校验 tag ↔ 版本 → 自检 → 发布 npm（优先 Trusted Publishing / OIDC，失败回退 `NPM_TOKEN`，均带 `--provenance`）→ 校验版本已在 npm 公开 → 打包 tarball + SHA-256 → 用 `scripts/release-notes.sh` 生成发布说明（版本信息 / 安装命令 / 产物校验和 / 按 conventional commit 分类的变更 / 质量校验 / 贡献者 / 对比链接）→ 创建 GitHub Release。
+- **UI verify（`.github/workflows/ui-verify.yml`，可选）**：手动触发或每天定时，用真实 DSH 引擎跑无头验收（面板全流程 / 换页交互 / 指令决策表 / 语言跟随）；`dsh_url` 留空时 CI 自己 `npm i -g @deepseek-ai/dsh` 起引擎并把本仓库装进 web profile。
+- **新增 `scripts/verify-package.mjs`**：离线校验清单字段、exports 指向、files 白名单、`cordis.patch.yml` roster 契约、客户端 bundle 的 `__ModuleLoader__` 包装与关键标记、宿主导出、CHANGELOG 版本小节。
+- **新增 `scripts/release-notes.sh`**：发布说明生成器（CI 与 Release 共用同一脚本，生成器坏掉会在 CI 先失败而不是发版时）。
+- **打包元数据**：`publishConfig`（public + 官方 registry）、`repository` / `homepage` / `bugs` / `keywords` / `author`，`files` 增加 `CHANGELOG.md`；`package-lock.json` 入库（`npm ci` 可复现），新增 `.gitattributes`（统一 LF、PNG 视为二进制）。
+- 验收脚本改用 `tools/lib/browser.js` 统一解析 Chromium 路径（Windows 仍用本机 Playwright 缓存，CI/Linux 交给 Playwright 自带浏览器，可用 `DSH_CHROMIUM` 覆盖）。
+
 ## 0.6.3
 
 - **去掉卡片底部提示行**：面板内不再渲染「选中的文件走官方上传通道」等提示文案，卡片高度明显降低；采集指令期间的加载反馈改为分页条位置的 6px 呼吸点（`.dmc-loading`，只占 8px，不增高）。

@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  check:
+    name: check (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines 要求 >=22.12.0：22 是最低支持线，24 是当前 LTS 前瞻。
+        node: [22, 24]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # --ignore-scripts：跳过 playwright 的安装期脚本（浏览器只给 UI verify 用）
+      - name: Install from the committed lockfile
+        run: npm ci --ignore-scripts
+
+      # 单测（jsdom 真实执行 client bundle）→ 离线冒烟（capabilities HTTP 往返 +
+      # 产物形状）→ 包清单 / patch / bundle 契约自检
+      - name: Run the release checks
+        run: npm run check
+
+      - name: Inspect package contents
+        run: npm pack --dry-run
+
+      - name: Pack the tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pack 2>/dev/null | tail -n1 > tarball.txt
+          cat tarball.txt
+
+      - name: Validate the release notes generator
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          TARBALL="$(cat tarball.txt)"
+          SHA256="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
+          TAG="v$VERSION" VERSION="$VERSION" PACKAGE_NAME="@xiaopb/dsh-mobile-compose" \
+            TARBALL="$TARBALL" SHA256="$SHA256" \
+            bash scripts/release-notes.sh "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 版本信息' "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 安装' "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 发布产物' "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 变更内容' "$RUNNER_TEMP/release-notes.md"
+          grep -q '^## 贡献者' "$RUNNER_TEMP/release-notes.md"
+          grep -q "$SHA256" "$RUNNER_TEMP/release-notes.md"
+          echo "release notes: $(wc -l < "$RUNNER_TEMP/release-notes.md") lines"
+
+      - name: Install the packed bundle like a consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARBALL="$(cat tarball.txt)"
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
+          npm init -y > /dev/null
+          # --legacy-peer-deps：peer 是宿主提供的（cordis / webServer / schemastery），
+          # 消费端安装时不需要真的把它们拉下来。
+          npm install --no-audit --no-fund --legacy-peer-deps "$GITHUB_WORKSPACE/$TARBALL"
+          PKG="$RUNNER_TEMP/consumer/node_modules/@xiaopb/dsh-mobile-compose"
+          node -e "
+            const p = require('$PKG/package.json');
+            if (p.dsh?.bundle?.patch !== './cordis.patch.yml') throw new Error('dsh.bundle.patch missing');
+            if (p.dsh?.client?.platform !== 'web') throw new Error('dsh.client.platform missing');
+            const h = require('$PKG');
+            if (typeof h.apply !== 'function') throw new Error('host entry does not export apply');
+            if (!Array.isArray(h.inject)) throw new Error('host entry does not export inject');
+          "
+          test -f "$PKG/lib/client.js"
+          test -f "$PKG/cordis.patch.yml"
+          grep -q '__ModuleLoader__' "$PKG/lib/client.js"
+          # 开发目录不能进包
+          for dir in test tools docs scripts; do
+            if [ -e "$PKG/$dir" ]; then echo "::error::$dir leaked into the tarball"; exit 1; fi
+          done
+          echo "installed bundle: $(node -p "require('$PKG/package.json').name + '@' + require('$PKG/package.json').version")"

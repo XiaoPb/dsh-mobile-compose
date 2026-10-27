@@ -1,5 +1,10 @@
 # dsh-mobile-compose
 
+[![CI](https://github.com/XiaoPb/dsh-mobile-compose/actions/workflows/ci.yml/badge.svg)](https://github.com/XiaoPb/dsh-mobile-compose/actions/workflows/ci.yml)
+[![Release](https://github.com/XiaoPb/dsh-mobile-compose/actions/workflows/release.yml/badge.svg)](https://github.com/XiaoPb/dsh-mobile-compose/actions/workflows/release.yml)
+[![npm](https://img.shields.io/npm/v/@xiaopb/dsh-mobile-compose.svg)](https://www.npmjs.com/package/@xiaopb/dsh-mobile-compose)
+[![license](https://img.shields.io/npm/l/@xiaopb/dsh-mobile-compose.svg)](LICENSE)
+
 DSH 网页界面插件：**手机端输入体验** —— 把输入框左下角的「添加文件」「调用指令」收编为一个「＋」入口，点击弹出 **QQ 式动作面板**（宫格瓦片，插在输入框正下方、与其等宽；所有窗口宽度表现一致；返回键 / Esc / 点击面板外关闭）。展开时「＋」旋转为「×」，再点或 Esc 关闭。面板动作按**文件来源细分**（相册 / 拍照 / 文档 / 指令），为安卓专门路由预留标准缝；选中的文件全部回流**官方上传通道**（校验 / 上传 / 附件预览零重复）。
 
 当前版本 0.6.x：**指令/技能全量接入官方 RPC**（单列表自动分页、每条指令专属图标、**文案跟随 DSH 语言**、单行等高瓦片）、**执行决策表对齐原生菜单**（带参数的指令只写草稿不代发；裸指令走官方 Enter 通道分离执行）、**面板 dock 化且独占一行**（不与进度等条目挤兑）、**DSH 设置页配置项**（动作开关 / 隐藏原生按钮 / 隐藏指令，改动实时生效）与**安卓端对接契约**（[docs/android-bridge.md](docs/android-bridge.md)）。
@@ -34,8 +39,15 @@ DSH 网页界面插件：**手机端输入体验** —— 把输入框左下角�
 ## 安装
 
 ```sh
+# 从 npm 安装（推荐）
+dsh plugin --profile web add @xiaopb/dsh-mobile-compose
+
 # 本地路径安装（开发验证）
 dsh plugin --profile web add /path/to/dsh-mobile-compose
+
+# 固定到某个 Release 的 tarball（离线）
+dsh plugin --profile web add /path/to/xiaopb-dsh-mobile-compose-0.6.4.tgz
+
 # 之后重启引擎（bundle 插件不热加载）
 ```
 
@@ -105,11 +117,32 @@ body.dmc-hide-native button:has(+ input[type="file"][multiple][hidden]:not([data
 | `actions.command` | `true` | 指令动作开关 |
 | `hiddenCommands` | `file` | 不展示的指令名（逗号分隔，不带斜杠）。`/file` 是官方「添加文件」指令，与图片/文件瓦片重复，默认剔除；清空 = 全部展示 |
 
+## CI/CD
+
+| 工作流 | 触发 | 做什么 |
+|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | push `main` / PR / 手动 | Node 22 与 24 矩阵：`npm ci` → `npm run check`（28 项单测 + 离线冒烟 + 包契约自检）→ `npm pack --dry-run` → 打 tarball → 校验发布说明生成器 → **消费端安装测试**（干净目录安装 tarball，校验 `dsh.bundle.patch` / `dsh.client.platform` / 宿主 `apply` 可加载 / 开发目录未混入包） |
+| [`release.yml`](.github/workflows/release.yml) | push `v*` tag / 手动 | 校验 tag ↔ `package.json` 版本 → 自检 → 发布 npm（优先 **Trusted Publishing**／OIDC，失败回退 `NPM_TOKEN`，均带 `--provenance`）→ 确认版本已在 npm 公开 → `npm pack` + SHA-256 → 生成发布说明（`scripts/release-notes.sh`）→ 创建 GitHub Release（附 tarball 与校验和） |
+| [`ui-verify.yml`](.github/workflows/ui-verify.yml) | 手动 / 每天 04:00（UTC+8） | 真机验收：用真实 DSH 引擎跑 `diag-browser`（面板全流程）、`verify-paging`（左右滑 / 滚轮）、`verify-decision`（`/goal` 只写草稿）、`verify-lang`（zh ↔ en）。`dsh_url` 留空时 CI 自建引擎并把本仓库装进 web profile；也可传入局域网引擎地址 |
+
+发布一个版本：
+
+```sh
+npm version patch          # 或 minor / major，自动改 package.json 并打 v* tag
+git push origin main --follow-tags
+# → Release 工作流接管：npm 发布 + GitHub Release（产物与 SHA-256）
+```
+
+**npm 发布凭据**：默认走 Trusted Publishing（在 npm 包设置里登记本仓库 + `release.yml`，允许 `id-token: write`，无需 secret）；登记前的兜底方式是仓库 Secret `NPM_TOKEN`。
+**本机跑真机验收**：`DSH_URL="http://127.0.0.1:3080/?token=..." node tools/diag-browser.js`（其余脚本同理，见 `npm run verify:paging` / `verify:lang`）。
+
 ## 验证
 
 ```sh
-npm test        # 单测（node:test，26 项：config / capabilities / 宿主接线含设置页 / jsdom 客户端行为）
+npm run check   # 一条命令跑完下面三项（CI 与 Release 用的同一入口）
+npm test        # 单测（node:test，28 项：config / capabilities / 宿主接线含设置页 / jsdom 客户端行为）
 npm run smoke   # E2E 冒烟：真实 HTTP 往返 + 客户端产物形状 + patch 形状
+node scripts/verify-package.mjs   # 包清单 / cordis patch / bundle 契约 / 宿主导出 / CHANGELOG 版本
 ```
 
 客户端 bundle 在 **jsdom 里真实执行**（加载契约 → apply 接线 → 渲染 → tab 切换 → 指令采集与官方通道执行 → 窄窗口统一 dock 形态 → 卸载清理），不依赖人工点检。

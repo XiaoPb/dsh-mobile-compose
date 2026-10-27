@@ -1,0 +1,102 @@
+name: UI verify
+
+# 真机验收（可选）：需要一台已启动的 DSH web 引擎，因此不在每次 push 跑，
+# 只在手动触发 / 每晚定时跑。引擎可由 CI 自己拉起，也可传入外部地址
+# （例如局域网里带安卓桥接的实例）。
+#
+# 传入 dsh_url 时直接用；留空时 CI 用 @deepseek-ai/dsh 起一个临时引擎并把
+# 本仓库作为插件装进 web profile。
+on:
+  workflow_dispatch:
+    inputs:
+      dsh_url:
+        description: '已启动的 DSH web 地址（含 ?token=...）；留空则 CI 自建引擎'
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 20 * * *'   # 每天 04:00（UTC+8）跑一次
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: ui-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DSH_VERSION: 0.2.1-rc.4
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: plugin
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+
+      - name: 安装插件依赖
+        working-directory: plugin
+        run: npm ci --ignore-scripts
+
+      - name: 安装无头 Chromium
+        working-directory: plugin
+        run: npx playwright install --with-deps chromium
+
+      - name: 准备 DSH 引擎（输入为空时自建）
+        if: inputs.dsh_url == ''
+        env:
+          DSH_HOME: ${{ runner.temp }}/dsh-home
+        run: |
+          set -euo pipefail
+          npm i -g @deepseek-ai/dsh@$DSH_VERSION
+          # 用随包发布的 web profile 模板（DSH_HOME 是全新的），把本仓库作为插件装进去
+          dsh plugin --profile web add "$GITHUB_WORKSPACE/plugin"
+          # 起引擎并把打印出的带 token 地址写进 $GITHUB_ENV
+          dsh web --port 3080 --no-open > /tmp/dsh.log 2>&1 &
+          for i in $(seq 1 60); do
+            if grep -qo 'http://127\.0\.0\.1:[0-9]*/?token=[A-Za-z0-9_-]*' /tmp/dsh.log; then break; fi
+            sleep 2
+          done
+          URL=$(grep -o 'http://127\.0\.0\.1:[0-9]*/?token=[A-Za-z0-9_-]*' /tmp/dsh.log | head -1)
+          test -n "$URL" || { echo '引擎未启动'; cat /tmp/dsh.log; exit 1; }
+          echo "DSH_URL=$URL" >> "$GITHUB_ENV"
+          echo "引擎已就绪：$URL"
+
+      - name: 使用传入的引擎地址
+        if: inputs.dsh_url != ''
+        run: echo "DSH_URL=${{ inputs.dsh_url }}" >> "$GITHUB_ENV"
+
+      - name: 面板全流程验收
+        working-directory: plugin
+        run: node tools/diag-browser.js
+
+      - name: 换页交互（移动端左右滑 / 桌面滚轮）
+        working-directory: plugin
+        run: node tools/verify-paging.js
+
+      - name: 指令执行决策表（/goal 只写草稿）
+        working-directory: plugin
+        run: node tools/verify-decision.js
+
+      - name: 文案跟随 DSH 语言（zh ↔ en）
+        working-directory: plugin
+        run: node tools/verify-lang.js
+
+      - name: 上传失败时的截图与引擎日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-verify-artifacts
+          path: |
+            plugin/tools/*.png
+            /tmp/dsh.log
+          if-no-files-found: ignore

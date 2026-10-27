@@ -3,6 +3,7 @@
  * 用法：DSH_URL="http://127.0.0.1:3080/?token=..." node tools/diag-browser.js
  */
 const { chromium } = require('playwright')
+const { launchOptions } = require('./lib/browser')
 
 const URL = process.env.DSH_URL
 if (!URL) {
@@ -11,10 +12,7 @@ if (!URL) {
 }
 
 async function main() {
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: process.env.LOCALAPPDATA + '\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe',
-  })
+  const browser = await chromium.launch(launchOptions())
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
 
   const logs = []

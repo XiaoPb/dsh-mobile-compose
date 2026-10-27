@@ -1,8 +1,8 @@
 // 换页交互验收：移动端左右滑 / 桌面端滚轮（真机 Chromium）
 const { chromium } = require('playwright')
+const { launchOptions } = require('./lib/browser')
 
 const URL = process.env.DSH_URL
-const EXE = process.env.LOCALAPPDATA + '\\ms-playwright\\chromium_headless_shell-1243\\chrome-headless-shell-win64\\chrome-headless-shell.exe'
 
 async function drag(cdp, x0, y0, x1, y1, steps = 8) {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y: y0 }] })
@@ -123,7 +123,7 @@ async function desktop(browser) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ headless: true, executablePath: EXE })
+  const browser = await chromium.launch(launchOptions())
   await mobile(browser)
   await desktop(browser)
   await browser.close()

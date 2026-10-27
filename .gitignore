@@ -1,8 +1,11 @@
 node_modules/
-package-lock.json
 *.log
 .DS_Store
 
+# 验收脚本的临时产物
 tools/accept-*.png
 tools/shell-dump.js
 tools/diag-*.png
+
+# 本地打包
+*.tgz
