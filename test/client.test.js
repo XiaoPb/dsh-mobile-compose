@@ -592,14 +592,18 @@ test('client bundle：文案跟随 DSH 语言（en → 英文单行标签，切�
   })
   const entry = document.querySelector('button.dmc-entry-btn')
   assert.equal(entry.getAttribute('aria-label'), 'Add content', '入口文案跟随语言（en）')
+  assert.equal(entry.classList.contains('dmc-open'), false, '收起态「＋」不带展开标记')
   await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
   await flush(120)
+  assert.ok(entry.classList.contains('dmc-open'), '展开后「＋」带 dmc-open（CSS 旋转 45° 成 ×）')
+  assert.equal(entry.getAttribute('aria-expanded'), 'true', '展开后 aria-expanded=true')
 
   const actionLabels = Array.from(document.querySelectorAll('[data-dmc-action] .dmc-tile-label')).map((n) => n.textContent)
   assert.deepEqual(actionLabels, ['Images', 'Files'], '动作标签跟随语言（en）')
   assert.equal(document.querySelector('.dmc-tile-sub'), null, '英文下单行标签、无次行')
   assert.equal(document.querySelector('[data-dmc-command="goal"] .dmc-tile-label').textContent, 'Goal', '指令标签来自 locale（en）')
-  assert.equal(document.querySelector('.dmc-hint').textContent, 'Picked files use the official upload path', '提示文案跟随语言（en）')
+  assert.equal(document.querySelector('.dmc-hint'), null, '卡片底部不再有提示文案')
+  assert.ok(!document.querySelector('.dmc-dock').textContent.includes('official upload'), '卡片内没有提示文本')
 
   // 语言切回中文 → 即时重渲染
   active = 'zh'
