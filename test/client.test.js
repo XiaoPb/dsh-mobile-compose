@@ -369,7 +369,7 @@ test('client bundle：remote.commands.list 拉全量指令，超出容量自动�
   assert.ok(page2.length > 0, '第 2 页有指令瓦片')
   assert.notDeepEqual(page1, page2, '两页内容不同')
 
-  // ---- 上滑 / 下滑手势翻页（与左右滑并存） ----
+  // ---- 换页交互：移动端左右滑 / 桌面端滚轮 ----
   const fireTouch = (el, type, x, y) => {
     const ev = new window.Event(type, { bubbles: true, cancelable: true })
     const point = { clientX: x, clientY: y, identifier: 1, target: el }
@@ -378,32 +378,46 @@ test('client bundle：remote.commands.list 拉全量指令，超出容量自动�
     Object.defineProperty(ev, 'changedTouches', { value: [point] })
     el.dispatchEvent(ev)
   }
+  const fireWheel = (el, deltaY, deltaX = 0) => {
+    const ev = new window.WheelEvent('wheel', { deltaY, deltaX, deltaMode: 0, bubbles: true, cancelable: true })
+    el.dispatchEvent(ev)
+    return ev.defaultPrevented
+  }
+  const names = () => Array.from(document.querySelectorAll('[data-dmc-command]')).map((t) => t.getAttribute('data-dmc-command'))
   const dock = document.querySelector('.dmc-dock')
-  assert.ok(dock.classList.contains('dmc-swipe'), '多页时接管纵向手势（touch-action:none）')
+  assert.ok(dock.classList.contains('dmc-swipe'), '多页时接管横向手势（touch-action:pan-y）')
 
-  // 当前在第 2 页：下滑 → 回第 1 页
-  await act(async () => {
-    fireTouch(dock, 'touchstart', 200, 240)
-    fireTouch(dock, 'touchend', 204, 320)
-  })
-  const afterSwipeDown = Array.from(document.querySelectorAll('[data-dmc-command]')).map((t) => t.getAttribute('data-dmc-command'))
-  assert.deepEqual(afterSwipeDown, page1, '下滑 → 上一页')
-
-  // 上滑 → 第 2 页
+  // 纵向滑动不翻页（交还给页面滚动）
   await act(async () => {
     fireTouch(dock, 'touchstart', 200, 320)
-    fireTouch(dock, 'touchend', 198, 244)
+    fireTouch(dock, 'touchend', 210, 200)
   })
-  const afterSwipeUp = Array.from(document.querySelectorAll('[data-dmc-command]')).map((t) => t.getAttribute('data-dmc-command'))
-  assert.deepEqual(afterSwipeUp, page2, '上滑 → 下一页')
+  assert.deepEqual(names(), page2, '纵向滑动不翻页')
 
-  // 位移不足阈值（<36px 纵向）不翻页
+  // 右滑 → 第 1 页；左滑 → 第 2 页
   await act(async () => {
     fireTouch(dock, 'touchstart', 200, 300)
-    fireTouch(dock, 'touchend', 200, 286)
+    fireTouch(dock, 'touchend', 320, 306)
   })
-  const afterTinySwipe = Array.from(document.querySelectorAll('[data-dmc-command]')).map((t) => t.getAttribute('data-dmc-command'))
-  assert.deepEqual(afterTinySwipe, page2, '微小位移不翻页')
+  assert.deepEqual(names(), page1, '右滑 → 上一页')
+  await act(async () => {
+    fireTouch(dock, 'touchstart', 320, 300)
+    fireTouch(dock, 'touchend', 190, 298)
+  })
+  assert.deepEqual(names(), page2, '左滑 → 下一页')
+
+  // 桌面滚轮：向上 → 上一页（并阻止页面滚动）
+  let prevented = false
+  await act(async () => { prevented = fireWheel(dock, -120) })
+  assert.deepEqual(names(), page1, '滚轮向上 → 上一页')
+  assert.ok(prevented, '滚轮翻页时阻止页面滚动')
+  // 冷却窗口内连续滚轮不连翻
+  await act(async () => { fireWheel(dock, -120) })
+  assert.deepEqual(names(), page1, '冷却窗口内不重复翻页')
+  // 冷却后再向下 → 下一页
+  await act(async () => { await new Promise((r) => setTimeout(r, 320)) })
+  await act(async () => { fireWheel(dock, 120) })
+  assert.deepEqual(names(), page2, '滚轮向下 → 下一页')
 
   await act(async () => { root.unmount() })
   dom.window.close()
