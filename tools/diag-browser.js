@@ -41,9 +41,8 @@ async function main() {
       const cmds = tiles.filter((t) => t.getAttribute('data-dmc-command')).map((t) => t.getAttribute('data-dmc-command'))
       const skills = tiles.filter((t) => t.getAttribute('data-dmc-skill')).map((t) => t.getAttribute('data-dmc-skill'))
       const rows = getComputedStyle(dock.querySelector('.dmc-grid')).gridTemplateRows.split(' ').length
-      // 聊天框宽度：composer 容器
-      const host = document.querySelector('[data-composer-dock]')
-      const composerCard = host && host.parentElement
+      // 聊天框宽度：官方输入卡片（面板必须与它严格等宽、左右对齐）
+      const composerCard = document.querySelector('[data-composer-card]')
       return {
         width: Math.round(dock.getBoundingClientRect().width),
         composerWidth: composerCard ? Math.round(composerCard.getBoundingClientRect().width) : null,
@@ -56,7 +55,10 @@ async function main() {
       }
     })
     if (!info) throw new Error('FAIL ② 点击后面板未出现')
-    logs.push(`PASS ② 面板 width=${info.width} composer=${info.composerWidth} rows=${info.rows} icons=${info.icons}/${info.actions.length + info.cmds.length}`)
+    if (info.composerWidth !== null && Math.abs(info.width - info.composerWidth) > 1) {
+      throw new Error(`FAIL ② 面板宽度未与输入框同步：panel=${info.width} composer=${info.composerWidth}`)
+    }
+    logs.push(`PASS ② 面板 width=${info.width} composer=${info.composerWidth}（等宽） rows=${info.rows} icons=${info.icons}/${info.actions.length + info.cmds.length}`)
     logs.push(`      常用=[${info.actions.join(',')}] 指令(${info.cmds.length})=[${info.cmds.join(',')}] 技能(${info.skills.length})=[${info.skills.slice(0,4).join(',')}...] 页码点=${info.pager}`)
     await page.screenshot({ path: 'tools/accept-panel.png' })
 
