@@ -1,0 +1,46 @@
+{
+  "name": "@xiaopb/dsh-mobile-compose",
+  "version": "0.3.0",
+  "description": "DSH web-UI plugin: mobile-first composer experience. Replaces the composer's add-file/command buttons with one plus entry that opens a QQ-style action sheet (image picker / camera / file / command), feeds every picked file back through the official addFiles intake, exposes a host capability route plus a DSH settings-page namespace so the panel can be configured in-app, and documents the bridge contract for routing actions to native Android intents.",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "test": "node --test --test-force-exit test/*.test.js",
+    "smoke": "node tools/smoke-e2e.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.5-rc.1",
+    "@deepseek-ai/schemastery": ">=3.18.1 <4"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5",
+    "jsdom": "^30.1.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

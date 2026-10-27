@@ -1,0 +1,7 @@
+# @xiaopb/dsh-mobile-compose bundle patch: 插入 web profile roster 行，使本插件
+# 的客户端 bundle（lib/client.js，__ModuleLoader__ closure factory）随 web GUI
+# 加载。UI 全部通过官方插槽（conversation.input.left）与官方上传通道工作，
+# 不禁用、不替换任何官方服务。
+- insert:
+    - id: mobile-compose
+      name: '@xiaopb/dsh-mobile-compose'
