@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2
+
+- **适配 DSH Android v1.4.27 的系统 Photo Picker 路由（上游 issue #54）**：host 的 `onShowFileChooser` 对「accept 全为图片 MIME」的请求改走系统照片选择器（缩略图网格 / 原生多选 / 免存储权限），判据是 `acceptTypes` 每个条目都以 `image/` 开头——扩展名条目（`.jpg` 等）会使判定失败。
+  - `pick-image`（安卓）：accept 从「MIME+扩展名混写」收敛为纯 MIME `image/*` → 命中 Photo Picker；旧版 host 与桌面走 `createIntent()` / 原生对话框，`image/*` 过滤同样成立，无行为回归。
+  - `take-photo`（安卓）：**保留**混写 accept——混入扩展名让 host 全图片判定失败、回落 `createIntent()`，`capture` 属性得以保留（照常拉起相机，而不是被 Photo Picker 抢走）。
+  - 桌面端维持原样（MIME+后缀，供原生文件对话框按后缀过滤）。
+- 测试：新增「安卓 host Photo Picker accept 适配」用例（28 项全过）。
+
 ## 0.6.1
 
 - **去掉瓦片第二行**：指令瓦片不再显示「中文主标签 + `/别名` 次行小字」，只保留**一行**当前语言的名字；斜杠别名与描述移入 `title`（悬停可见，不占行）。所有瓦片固定等高（84px），面板内卡片高度完全一致。

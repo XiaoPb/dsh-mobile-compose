@@ -331,6 +331,54 @@ test('client bundle：能力协商失败时走内置默认集（不抛错、全�
   dom.window.close()
 })
 
+test('client bundle：安卓 host（v1.4.27 Photo Picker）accept 适配', async () => {
+  const dom = setupDom()
+  const loaded = loadClient({
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ ...CAPS_BODY, platform: { android: true, web: true } }),
+    }),
+  })
+  const ctx = mockCtx()
+  loaded.mod.apply(ctx)
+  await flush() // 能力协商 fetch 落地（caps.android=true）
+
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const dockHost = document.createElement('div')
+  dockHost.setAttribute('data-composer-dock', '')
+  document.body.appendChild(dockHost)
+  const root = createRoot(container)
+  await act(async () => {
+    root.render(React.createElement(ctx.state.registered.find((r) => r.meta.id === 'dsh-mobile-compose-plus').comp, { sessionId: 'session-test' }))
+  })
+  await act(async () => {
+    document.querySelector('button.dmc-entry-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  })
+
+  // 安卓 → take-photo 瓦片可见
+  const dockEl = document.querySelector('.dmc-dock')
+  assert.ok(dockEl, 'dock 面板已打开')
+  assert.ok(dockEl.querySelector('.dmc-tile[data-dmc-action="take-photo"]'), '安卓展示拍照瓦片')
+
+  // pick-image：accept 收敛为纯 MIME image/* → 命中 host Photo Picker 路由
+  const imageInput = dockEl.querySelector('input[data-dmc-role="pick-image"]')
+  assert.ok(imageInput, '图片动作自带 input 在面板内')
+  assert.equal(imageInput.getAttribute('accept'), 'image/*', '安卓图片动作 accept 为纯 MIME image/*（Photo Picker 路由）')
+
+  // take-photo：保留 MIME+扩展名混写 → host 全图片判定失败回落 createIntent()，capture 保留
+  const photoInput = dockEl.querySelector('input[data-dmc-role="take-photo"]')
+  assert.ok(photoInput, '拍照动作自带 input 在面板内')
+  assert.equal(photoInput.getAttribute('accept'), IMAGE_ACCEPT, '安卓拍照动作保留混写 accept（避开 Photo Picker，保住相机）')
+
+  // pick-file：不限后缀（与桌面一致）
+  const fileInput = dockEl.querySelector('input[data-dmc-role="pick-file"]')
+  assert.equal(fileInput.getAttribute('accept'), null, '文件动作不限后缀')
+
+  await act(async () => { root.unmount() })
+  dom.window.close()
+})
+
 test('client bundle：remote.commands.list 拉全量指令，超出容量自动分页（页码点）', async () => {
   const dom = setupDom()
   const loaded = loadClient()
