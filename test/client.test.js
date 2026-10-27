@@ -201,7 +201,7 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   })
   await flush()
 
-  const entry = document.querySelector('button[aria-label="添加内容"]')
+  const entry = document.querySelector('button.dmc-entry-btn')
   assert.ok(entry, '加号入口已渲染')
 
   // 打开面板（宽窗口 → dock 形态：文档流内、不浮动）
@@ -247,8 +247,9 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   const names = cmdTiles.map((b) => b.getAttribute('data-dmc-command'))
   assert.deepEqual(names, ['compact', 'export', 'plan'], '指令表已采集并渲染为选项瓦片')
   assert.ok(cmdTiles[0].querySelector('.dmc-tile-box svg'), '指令瓦片带图标')
-  assert.equal(cmdTiles[0].querySelector('.dmc-tile-label').textContent, '压缩', '指令瓦片主标签为中文')
-  assert.equal(cmdTiles[0].querySelector('.dmc-tile-sub').textContent, '/compact', '斜杠别名为次行小字')
+  assert.equal(cmdTiles[0].querySelector('.dmc-tile-label').textContent, '压缩', '指令瓦片主标签为中文（跟随 DSH 语言）')
+  assert.equal(cmdTiles[0].querySelector('.dmc-tile-sub'), null, '不再有第二行（斜杠别名只留在 title）')
+  assert.ok(cmdTiles[0].querySelectorAll('.dmc-tile-label').length === 1, '每条指令只有一个标签行')
   const allTiles = Array.from(document.querySelectorAll('.dmc-tile'))
   assert.deepEqual(allTiles.slice(0, 2).map((t) => t.getAttribute('data-dmc-action')), ['pick-image', 'pick-file'], '常用动作排在最前')
 
@@ -322,7 +323,7 @@ test('client bundle：能力协商失败时走内置默认集（不抛错、全�
     root.render(React.createElement(ctx.state.registered.find((r) => r.meta.id === 'dsh-mobile-compose-plus').comp, { sessionId: 'session-test' }))
   })
   await act(async () => {
-    document.querySelector('button[aria-label="添加内容"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    document.querySelector('button.dmc-entry-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
   // 拉取失败 → caps.ready=false → 全部 4 个动作按内置默认展示
   assert.equal(document.querySelectorAll('.dmc-tile').length, 4)
@@ -355,7 +356,7 @@ test('client bundle：remote.commands.list 拉全量指令，超出容量自动�
     root.render(React.createElement(ctx.state.registered[0].comp, { sessionId: 'session-test' }))
   })
   await act(async () => {
-    document.querySelector('button[aria-label="添加内容"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    document.querySelector('button.dmc-entry-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
   await flush(120)
 
@@ -468,7 +469,7 @@ test('client bundle：指令执行决策表（input→claim 不代发；裸指�
     root.render(React.createElement(ctx.state.registered[0].comp, { inputActions, sessionId: 'session-test' }))
   })
   await act(async () => {
-    document.querySelector('button[aria-label="添加内容"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    document.querySelector('button.dmc-entry-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
   await flush(120)
 
@@ -478,7 +479,7 @@ test('client bundle：指令执行决策表（input→claim 不代发；裸指�
   // 带 input 的指令 → claim：本地化 token 写入草稿，不提交（与原生菜单一致）
   const goalTile = document.querySelector('[data-dmc-command="goal"]')
   assert.equal(goalTile.querySelector('.dmc-tile-label').textContent, '目标', 'locale 中文标签')
-  assert.equal(goalTile.querySelector('.dmc-tile-sub').textContent, '/goal', '斜杠别名为次行小字')
+  assert.equal(goalTile.querySelector('.dmc-tile-sub'), null, '不再有第二行（高度统一）')
   await act(async () => { goalTile.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
   assert.deepEqual(draftWrites, ['/目标 '], 'claim 写入本地化 token（与原生菜单拼写一致）')
   assert.equal(submits, 0, '带 input 的指令不代发')
@@ -486,13 +487,78 @@ test('client bundle：指令执行决策表（input→claim 不代发；裸指�
 
   // 裸指令 → Enter 通道：setDraft('/x') + submit（官方分离执行）
   await act(async () => {
-    document.querySelector('button[aria-label="添加内容"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    document.querySelector('button.dmc-entry-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
   const compactTile = document.querySelector('[data-dmc-command="compact"]')
   assert.equal(compactTile.querySelector('.dmc-tile-label').textContent, '压缩', 'locale 中文标签（compact）')
   await act(async () => { compactTile.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
   assert.deepEqual(draftWrites, ['/目标 ', '/compact'], '裸指令按裸 token 提交')
   assert.equal(submits, 1, '裸指令经官方 submit 分离执行')
+
+  await act(async () => { root.unmount() })
+  dom.window.close()
+})
+
+test('client bundle：文案跟随 DSH 语言（en → 英文单行标签，切回 zh 即时更新）', async () => {
+  const dom = setupDom()
+  const loaded = loadClient()
+  const ctx = mockCtx()
+  loaded.mod.apply(ctx)
+
+  let active = 'en'
+  const localeListeners = new Set()
+  const enDict = { 'label.goal': 'Goal', 'label.compact': 'Compact', 'token.goal': 'Goal' }
+  const localeInject = ctx.state.dynamicInjects.find((d) => d.names.includes('locale'))
+  assert.ok(localeInject, '声明了 locale 动态注入')
+  localeInject.cb({
+    locale: {
+      getSnapshot: () => ({ active, revision: 0 }),
+      bind: (ns) => (key) => (ns === 'command' && key in enDict ? enDict[key] : key),
+    },
+    on: (event, fn) => { if (event === 'locale/change') localeListeners.add(fn) },
+  })
+
+  const inject = ctx.state.dynamicInjects.find((d) => d.names.includes('remote.commands'))
+  inject.cb({
+    remote: {
+      commands: {
+        list: async () => ({
+          ok: true,
+          value: [
+            { name: 'goal', description: 'Set or view the goal' },
+            { name: 'compact', description: 'Compact older conversation history' },
+          ],
+        }),
+      },
+    },
+  })
+
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const dockHost = document.createElement('div')
+  dockHost.setAttribute('data-composer-dock', '')
+  document.body.appendChild(dockHost)
+  const root = createRoot(container)
+  await act(async () => {
+    root.render(React.createElement(ctx.state.registered[0].comp, { sessionId: 'session-en' }))
+  })
+  const entry = document.querySelector('button.dmc-entry-btn')
+  assert.equal(entry.getAttribute('aria-label'), 'Add content', '入口文案跟随语言（en）')
+  await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
+  await flush(120)
+
+  const actionLabels = Array.from(document.querySelectorAll('[data-dmc-action] .dmc-tile-label')).map((n) => n.textContent)
+  assert.deepEqual(actionLabels, ['Images', 'Files'], '动作标签跟随语言（en）')
+  assert.equal(document.querySelector('.dmc-tile-sub'), null, '英文下单行标签、无次行')
+  assert.equal(document.querySelector('[data-dmc-command="goal"] .dmc-tile-label').textContent, 'Goal', '指令标签来自 locale（en）')
+  assert.equal(document.querySelector('.dmc-hint').textContent, 'Picked files use the official upload path', '提示文案跟随语言（en）')
+
+  // 语言切回中文 → 即时重渲染
+  active = 'zh'
+  await act(async () => { for (const fn of Array.from(localeListeners)) fn() })
+  assert.equal(entry.getAttribute('aria-label'), '添加内容', '切回 zh 后入口文案即时更新')
+  const zhLabels = Array.from(document.querySelectorAll('[data-dmc-action] .dmc-tile-label')).map((n) => n.textContent)
+  assert.deepEqual(zhLabels, ['图片', '文件'], '切回 zh 后动作标签即时更新')
 
   await act(async () => { root.unmount() })
   dom.window.close()

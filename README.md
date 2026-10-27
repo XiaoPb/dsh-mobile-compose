@@ -2,7 +2,7 @@
 
 DSH 网页界面插件：**手机端输入体验** —— 把输入框左下角的「添加文件」「调用指令」收编为一个「＋」入口，点击弹出 **QQ 式动作面板**（宫格瓦片，插在输入框正下方、与其等宽；所有窗口宽度表现一致；返回键 / Esc / 点击面板外关闭）。面板动作按**文件来源细分**（相册 / 拍照 / 文档 / 指令），为安卓专门路由预留标准缝；选中的文件全部回流**官方上传通道**（校验 / 上传 / 附件预览零重复）。
 
-当前版本 0.5.x：**指令/技能全量接入官方 RPC**（单列表自动分页、每条指令专属图标、中文标签来自官方 locale）、**执行决策表对齐原生菜单**（带参数的指令只写草稿不代发；裸指令走官方 Enter 通道分离执行）、**面板 dock 化且独占一行**（不与进度等条目挤兑）、**DSH 设置页配置项**（动作开关 / 隐藏原生按钮 / 隐藏指令，改动实时生效）与**安卓端对接契约**（[docs/android-bridge.md](docs/android-bridge.md)）。
+当前版本 0.6.x：**指令/技能全量接入官方 RPC**（单列表自动分页、每条指令专属图标、**文案跟随 DSH 语言**、单行等高瓦片）、**执行决策表对齐原生菜单**（带参数的指令只写草稿不代发；裸指令走官方 Enter 通道分离执行）、**面板 dock 化且独占一行**（不与进度等条目挤兑）、**DSH 设置页配置项**（动作开关 / 隐藏原生按钮 / 隐藏指令，改动实时生效）与**安卓端对接契约**（[docs/android-bridge.md](docs/android-bridge.md)）。
 
 ## 职责划分：插件做什么，外部做什么
 
@@ -10,7 +10,7 @@ DSH 网页界面插件：**手机端输入体验** —— 把输入框左下角�
 |---|---|---|
 | 输入框「＋」入口、动作面板 UI、动画、返回键关闭 | **插件** | 全部走官方插槽（`conversation.input.left` + `conversation.composer.dock`），零 DOM 注入 |
 | 动作注册表与来源标记（gallery/camera/document/internal） | **插件** | 面板宫格的单一事实来源 |
-| 指令接管 | **插件** | 指令/技能目录来自官方 RPC（`remote.commands.list` / `remote.skills.list`），中文标签来自官方 locale + 原生菜单采集兜底；执行按**官方 dispatch 决策表**：带 `input` 的指令只把 `/token ` 写进草稿（用户补参数后自行发送），裸指令走 `setDraft('/x')+submit()` 官方 Enter 通道 |
+| 指令接管 | **插件** | 指令/技能目录来自官方 RPC（`remote.commands.list` / `remote.skills.list`），标签来自官方 locale + 原生菜单采集兜底（跟随 DSH 语言）；执行按**官方 dispatch 决策表**：带 `input` 的指令只把 `/token ` 写进草稿（用户补参数后自行发送），裸指令走 `setDraft('/x')+submit()` 官方 Enter 通道 |
 | 桌面端文件选取 | **插件** | 图片 / 文件都是同一个 file 输入的两个视图：图片附**显式图片后缀过滤**（`image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif`）；文件**不限后缀**（= 原始 file，处理全部类型） |
 | 文件回流与上传 | **插件** | DataTransfer 注入官方隐藏 input → 官方 onPickFiles → addFiles 校验/上传/预览 |
 | 动作能力协商 | **插件（宿主）** | `GET /api/dsh-mobile-compose/capabilities`，实时反映设置页配置 |
@@ -37,7 +37,7 @@ dsh plugin --profile web add /path/to/dsh-mobile-compose
 2. 单一列表：常用动作在最前，指令/技能紧随其后；宫格列数随面板宽度自适应，放不下自动生成页码点（可点；**移动端左右滑**、**桌面端鼠标滚轮**换页）；
 3. 「图片」→ 原生文件打开器弹出且**默认过滤到图片类型**（显式后缀 accept）；选 1-2 张 → 附件预览条出现、走官方上传（进度 / receipt）；
 4. 「文件」→ 原生文件打开器（不限后缀，即原始 file）；
-5. 指令瓦片与动作同列：RPC 全量目录 + 中文主标签 + `/别名` 次行小字；点带参数的指令（如 /goal）→ 只插入 `/目标 ` 到聊天框（**不发送**，与原生菜单一致）；点裸指令（如 /compact）→ 官方 Enter 通道分离执行；
+5. 指令瓦片与动作同列：RPC 全量目录 + **单行标签**（中文或英文，跟随 DSH 语言；所有瓦片等高 84px，斜杠别名只在悬停 title 里）；点带参数的指令（如 /goal）→ 只插入 `/目标 ` 到聊天框（**不发送**，与原生菜单一致）；点裸指令（如 /compact）→ 官方 Enter 通道分离执行；
 6. 把窗口缩到手机宽度（或 DevTools 设备模拟）→ 面板形态**不变**（仍插在输入框下方、与其等宽），Esc / 系统返回键 / 点击面板外关闭；
 7. 设置页 → Plugins → dsh-mobile-compose：关掉任一动作 → 不重载页面，再点「＋」该瓦片已消失。
 
@@ -51,7 +51,7 @@ web GUI ──▶ __ModuleLoader__ 装载 lib/client.js（closure factory，形�
    ├─ 面板 = 单一列表自动分页（页码点 + 移动端左右滑 / 桌面滚轮）；宫格列数随宽度自适应
    ├─ 动作注册表：pick-image(相册) / take-photo(拍照) / pick-file(文档) / command(指令)
    │    每项带 source 标记（gallery/camera/document/internal）——安卓专门路由的缝
-   ├─ 指令接管：RPC 全量目录为权威；原生菜单采集（visibility:hidden）仅补中文标签/顺序；
+   ├─ 指令接管：RPC 全量目录为权威；原生菜单采集（visibility:hidden）仅补标签/顺序；
    │    执行 = 官方 dispatch 决策表（input→claim 写草稿不代发；裸指令→setDraft+submit）
    │    （官方裁决通道）；采集失败回退原生菜单点选
    ├─ 桌面：图片动作 = 自带 input + 显式图片后缀 accept（原始文件打开器按类型过滤）；
