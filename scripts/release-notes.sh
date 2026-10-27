@@ -135,7 +135,8 @@ done < <(git log --no-merges --pretty=format:'%h%x09%s%n' "$RANGE")
   fi
   echo "## 质量校验"
   echo ""
-  echo "- \`npm run check\`：28 项单测（jsdom 真实执行 client bundle）+ 离线冒烟（capabilities HTTP 往返 / 产物形状）+ 包清单与 bundle 契约自检"
+  echo "- \`npm run check\`：34 项单测（jsdom 真实执行 client bundle + 发布脚本的假 npm 用例）+ 离线冒烟（capabilities HTTP 往返 / 产物形状）+ 包清单与 bundle 契约自检"
+  echo "- 发布后校验版本确实在 registry 公开（\`npm view\` 轮询，失败会自动回退 token 并再确认）"
   echo "- 打包后在干净目录里安装并校验（CI consumer 测试）"
   echo "- 真机验收（可选工作流 \`UI verify\`）：面板全流程 / 换页交互 / 指令决策表 / 语言跟随"
   echo "${CI_LINE}"

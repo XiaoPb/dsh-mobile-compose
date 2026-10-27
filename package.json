@@ -1,6 +1,6 @@
 {
   "name": "@xiaopb/dsh-mobile-compose",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "DSH web-UI plugin: mobile-first composer experience. Replaces the composer's add-file/command buttons with one plus entry that opens a QQ-style action sheet (image picker / camera / file / command tiles; command execution follows the official dispatch decision table (input commands claim the draft, bare commands execute via the official Enter channel)), feeds every picked file back through the official addFiles intake, exposes a host capability route plus a DSH settings-page namespace so the panel can be configured in-app, and documents the bridge contract for routing actions to native Android intents.",
   "main": "lib/index.js",
   "exports": {

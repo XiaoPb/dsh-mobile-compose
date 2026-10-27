@@ -121,7 +121,8 @@ body.dmc-hide-native button:has(+ input[type="file"][multiple][hidden]:not([data
 
 | 工作流 | 触发 | 做什么 |
 |---|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | push `main` / PR / 手动 | Node 22 与 24 矩阵：`npm ci` → `npm run check`（28 项单测 + 离线冒烟 + 包契约自检）→ `npm pack --dry-run` → 打 tarball → 校验发布说明生成器 → **消费端安装测试**（干净目录安装 tarball，校验 `dsh.bundle.patch` / `dsh.client.platform` / 宿主 `apply` 可加载 / 开发目录未混入包） |
+| [`ci.yml`](.github/workflows/ci.yml) | push `main` / PR / 手动 | Node 22 与 24 矩阵：`npm ci` → `npm run check`（34 项单测 + 离线冒烟 + 包契约自检）→ `npm pack --dry-run` → 打 tarball → 校验发布说明生成器 → **消费端安装测试**（干净目录安装 tarball，校验 `dsh.bundle.patch` / `dsh.client.platform` / 宿主 `apply` 可加载 / 开发目录未混入包） |
+| [`release.yml`](.github/workflows/release.yml) | push `v*` tag / 手动 | 校验 tag ↔ `package.json` 版本 → 自检 → 发布 npm（`scripts/publish-npm.sh`：优先 **Trusted Publishing**／OIDC，版本未真正公开时回退 **`NPM_TOKEN`**；每种方式都「发布 + 轮询确认公开」，`--provenance` 失败自动降级重试）→ 确认版本已在 npm 公开 → `npm pack` + SHA-256 → 生成发布说明（`scripts/release-notes.sh`）→ 创建 GitHub Release（附 tarball 与校验和） |
 | [`release.yml`](.github/workflows/release.yml) | push `v*` tag / 手动 | 校验 tag ↔ `package.json` 版本 → 自检 → 发布 npm（优先 **Trusted Publishing**／OIDC，失败回退 `NPM_TOKEN`，均带 `--provenance`）→ 确认版本已在 npm 公开 → `npm pack` + SHA-256 → 生成发布说明（`scripts/release-notes.sh`）→ 创建 GitHub Release（附 tarball 与校验和） |
 | [`ui-verify.yml`](.github/workflows/ui-verify.yml) | 手动 / 每天 04:00（UTC+8） | 真机验收：用真实 DSH 引擎跑 `diag-browser`（面板全流程）、`verify-paging`（左右滑 / 滚轮）、`verify-decision`（`/goal` 只写草稿）、`verify-lang`（zh ↔ en）。`dsh_url` 留空时 CI 自建引擎并把本仓库装进 web profile；也可传入局域网引擎地址 |
 
@@ -133,14 +134,15 @@ git push origin main --follow-tags
 # → Release 工作流接管：npm 发布 + GitHub Release（产物与 SHA-256）
 ```
 
-**npm 发布凭据**：默认走 Trusted Publishing（在 npm 包设置里登记本仓库 + `release.yml`，允许 `id-token: write`，无需 secret）；登记前的兜底方式是仓库 Secret `NPM_TOKEN`。
+**npm 发布凭据**：默认走 Trusted Publishing（在 npm 包设置里登记本仓库 + `release.yml`，允许 `id-token: write`，无需 secret）；**版本没真正公开时自动回退**仓库 Secret `NPM_TOKEN`（需是可发布的 granular token：不能 stage-only / read-only，allowed packages 要包含本包）。包**首次发布**前 npm 上还不存在这个包名，Trusted Publisher 也登记不了——先在本地 `npm login && npm publish --access public` 走一次（或 `npm stage publish` 后在 npmjs.com 的 Staged Packages 里用 2FA 批准），之后 tag 发布即可全自动。
+**发布排查**：`scripts/publish-npm.sh` 失败时会打印 `npm whoami`、registry 该版本的 status、`npm stage list` 与 npm 报错原文；本地复现可用 `PACKAGE_NAME=... VERSION=... PROBE_REGISTRY=0 bash scripts/publish-npm.sh`（无凭据时只会走诊断分支）。
 **本机跑真机验收**：`DSH_URL="http://127.0.0.1:3080/?token=..." node tools/diag-browser.js`（其余脚本同理，见 `npm run verify:paging` / `verify:lang`）。
 
 ## 验证
 
 ```sh
 npm run check   # 一条命令跑完下面三项（CI 与 Release 用的同一入口）
-npm test        # 单测（node:test，28 项：config / capabilities / 宿主接线含设置页 / jsdom 客户端行为）
+npm test        # 单测（node:test，34 项：config / capabilities / 宿主接线含设置页 / jsdom 客户端行为 / 发布脚本）
 npm run smoke   # E2E 冒烟：真实 HTTP 往返 + 客户端产物形状 + patch 形状
 node scripts/verify-package.mjs   # 包清单 / cordis patch / bundle 契约 / 宿主导出 / CHANGELOG 版本
 ```
