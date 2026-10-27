@@ -3,10 +3,12 @@ name: Release
 
 # 打 tag 或手动触发时执行完整发布：
 #   · 校验 tag ↔ package.json 版本一致
-#   · 运行仓库自检（35 项单测 + 离线冒烟 + 包清单 / bundle 契约）
-#   · 发布 npm：优先 Trusted Publishing（OIDC，无需 token），**未真正公开**时回退 NPM_TOKEN
-#     —— 每种方式都「发布 + 轮询确认版本已在 registry 可见」，不只看 npm publish 的退出码
-#   · 校验版本确实已公开，再打包 tarball + SHA-256、生成完整发布说明并创建/更新 Release
+#   · 运行仓库自检（36 项单测 + 离线冒烟 + 包清单 / bundle 契约）
+#   · 发布 npm：优先 Trusted Publishing（OIDC），不可用时回退 NPM_TOKEN
+#     —— 每种方式都「发布 + 轮询确认版本已在 registry 可见」；npm 发布后要先过自动校验
+#       （版本状态 "validating"，实测 1~3 分钟后才可读），所以**发布被接受后读不到不算失败**，
+#       只有被 registry 拒绝（认证/权限）才让流程失败
+#   · npm pack + SHA-256、生成完整发布说明并创建/更新 Release
 #
 # 首选的 Trusted Publishing 需要在 npm 包设置里登记本仓库与 workflow 文件名
 # （release.yml），并允许 id-token: write。回退方式需要 Secret：NPM_TOKEN

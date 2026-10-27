@@ -108,8 +108,8 @@ test('publish-npm: 没有任何发布凭据 → 不发 publish，直接给出诊
   const res = runPublish({});
   assert.equal(res.status, 1, '没有凭据时应当失败');
   assert.equal(res.calls.filter((c) => c.startsWith('publish ')).length, 0);
-  assert.match(res.stdout, /Version not public/);
-  assert.match(res.stdout, /Staged Packages/);
+  assert.match(res.stdout, /Publish rejected/);
+  assert.match(res.stdout, /Trusted Publisher/);
 });
 
 test('publish-npm: OIDC 发布且立刻公开 → trusted publishing', { skip: !hasBash && 'bash 不可用' }, () => {
@@ -150,26 +150,43 @@ test('publish-npm: provenance 失败时自动去掉 --provenance 重试', { skip
   assert.doesNotMatch(publishes[1], /--provenance/);
 });
 
+test('publish-npm: OIDC 认证被拒 → 不空等，立刻走 token 兜底', { skip: !hasBash && 'bash 不可用' }, () => {
+  const started = Date.now();
+  const res = runPublish({
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example.invalid/token',
+    NODE_AUTH_TOKEN: 'npm_faketoken',
+    FAKE_TRUSTED_PUBLISH_RC: '1',
+    FAKE_TOKEN_MAKES_PUBLIC: '1',
+  });
+  assert.equal(res.status, 0, res.stdout);
+  assert.equal(res.outputs.method, 'NPM_TOKEN');
+  assert.equal(res.calls.filter((c) => c.startsWith('publish ')).length, 2);
+  assert.match(res.stdout, /被拒/);
+  assert.ok(Date.now() - started < 10_000, '被拒后不该继续轮询等待');
+});
+
 test('publish-npm: registry 回「已存在该版本」→ 不再换方式重发，只等刷新', { skip: !hasBash && 'bash 不可用' }, () => {
   const res = runPublish({
     ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example.invalid/token',
     NODE_AUTH_TOKEN: 'npm_faketoken',
     FAKE_CONFLICT: '1',
   });
-  assert.equal(res.status, 1, res.stdout);
+  assert.equal(res.status, 0, res.stdout);
   const publishes = res.calls.filter((c) => c.startsWith('publish '));
   assert.equal(publishes.length, 1, `冲突后不该再用 token 重发：${publishes.join(' | ')}`);
   assert.match(res.stdout, /已存在该版本/);
+  assert.match(res.stdout, /不阻断发布流程/);
+  assert.equal(res.outputs.method, 'publish accepted (visibility pending)');
 });
 
-test('publish-npm: 两条路都没公开 → 失败并给出 staged 处置建议', { skip: !hasBash && 'bash 不可用' }, () => {
+test('publish-npm: 两种方式都发出但窗口内没读到公开版本 → 不失败，提醒后继续', { skip: !hasBash && 'bash 不可用' }, () => {
   const res = runPublish({
     ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example.invalid/token',
     NODE_AUTH_TOKEN: 'npm_faketoken',
     FAKE_TOKEN_PUBLISH_RC: '0',
   });
-  assert.equal(res.status, 1);
-  assert.match(res.stdout, /Version not public/);
-  assert.match(res.stdout, /Staged Packages/);
-  assert.match(res.stdout, /Trusted Publisher/);
+  assert.equal(res.status, 0, res.stdout);
+  assert.equal(res.outputs.method, 'publish accepted (visibility pending)');
+  assert.match(res.stdout, /不阻断发布流程/);
+  assert.match(res.stdout, /npm view @xiaopb\/dsh-mobile-compose@0\.6\.5/);
 });

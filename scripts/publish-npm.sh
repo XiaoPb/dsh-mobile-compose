@@ -76,9 +76,26 @@ wait_public() { # $1 = 方式标签，$2 = 轮询次数（可选）；成功 0�
     raw="$(npm view "$SPEC" version --registry "$REGISTRY" 2>&1 || true)"
     raw="$(printf '%s' "$raw" | head -n 2 | tr '\n' ' ')"
     info "第 $attempt/$attempts 次确认：尚未公开 · ${raw:-（无输出）}"
+    # registry 的版本状态端点能直接说明「在自动校验 / 待批准 / 已拒绝」，每一轮都打一次
+    probe_version_status
     if [ "$attempt" -lt "$attempts" ]; then sleep "$POLL_INTERVAL"; fi
   done
   return 1
+}
+
+# ---------- registry 版本状态（需要 token）----------
+# 例如 {"status":"validating"} 表示 npm 正在自动校验（provenance/签名），通常 1~3 分钟后才可读；
+# 这一步能区分「还在校验」和「被拒 / 根本没有这次发布」。
+probe_version_status() {
+  if [ "${PROBE_REGISTRY:-1}" = "0" ] || [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+    return 0
+  fi
+  local body
+  body="$(curl -sS -m 10 -H "Authorization: Bearer $NODE_AUTH_TOKEN" \
+    "$REGISTRY/-/package/$NAME_ENCODED/version/$VERSION/status" 2>/dev/null || true)"
+  if [ -n "$body" ]; then
+    info "registry 版本状态：$(printf '%s' "$body" | tr -d '\n' | cut -c1-200)"
+  fi
 }
 
 # ---------- 单次发布尝试 ----------
@@ -181,20 +198,39 @@ if is_public; then
   exit 0
 fi
 
-# ---------- 1) Trusted Publishing (OIDC) ----------
+# 用一种方式发布并确认可见。返回 0 = 已确认公开（method 已写入输出）
 CONFLICT=0
-if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-  ATTEMPT_RC=0
-  attempt_publish trusted "可信发布" || ATTEMPT_RC=$?
-  if [ "$ATTEMPT_RC" = "2" ]; then CONFLICT=1; fi
+ACCEPTED=0
+try_method() { # $1 = trusted|token，$2 = 日志标签，$3 = method 输出值
+  local mode="$1" label="$2" method="$3" rc=0 attempts
 
-  WAIT_ATTEMPTS="$POLL_ATTEMPTS"
-  if [ "$CONFLICT" = "1" ]; then WAIT_ATTEMPTS=$((POLL_ATTEMPTS * 2)); fi
-  if wait_public "trusted publishing" "$WAIT_ATTEMPTS"; then
-    set_output method "trusted publishing (OIDC)"
-    exit 0
+  attempt_publish "$mode" "$label" || rc=$?
+  if [ "$rc" = "2" ]; then CONFLICT=1; fi
+  if [ "$PUB_RC" = "0" ] || [ "$rc" = "2" ]; then ACCEPTED=1; fi
+
+  # 发布被直接拒（认证/权限问题）时不用等：等也不会变公开，直接换下一种方式
+  if [ "$PUB_RC" -ne 0 ] && [ "$CONFLICT" = "0" ]; then
+    info "$label 被拒（退出码 $PUB_RC），跳过等待"
+    if grep_log 'ENEEDAUTH|E401|E403|need auth'; then
+      info "提示：认证没通过。OIDC 需要先在 npm 包设置里登记 Trusted Publisher（repo + release.yml）；"
+      info "      token 需要是可发布的 granular token，且 allowed packages 包含本包。"
+    fi
+    return 1
   fi
-  info "可信发布没有让版本在等待窗口内公开（包未登记 Trusted Publisher / OIDC 被拒 / registry 还在刷新）"
+
+  attempts="$POLL_ATTEMPTS"
+  if [ "$CONFLICT" = "1" ]; then attempts=$((POLL_ATTEMPTS * 2)); fi
+  if wait_public "$method" "$attempts"; then
+    set_output method "$method"
+    return 0
+  fi
+  return 1
+}
+
+# ---------- 1) Trusted Publishing (OIDC) ----------
+if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+  if try_method trusted "可信发布" "trusted publishing (OIDC)"; then exit 0; fi
+  info "可信发布没有让版本在等待窗口内可见"
 else
   info "没有 OIDC 上下文（ACTIONS_ID_TOKEN_REQUEST_URL 缺失），跳过可信发布"
 fi
@@ -203,17 +239,8 @@ fi
 if [ "$CONFLICT" = "1" ]; then
   info "registry 已收录 $SPEC，token 兜底重发没有意义，跳过"
 elif [ -n "${NODE_AUTH_TOKEN:-}" ]; then
-  ATTEMPT_RC=0
-  attempt_publish token "token 发布" || ATTEMPT_RC=$?
-  if [ "$ATTEMPT_RC" = "2" ]; then CONFLICT=1; fi
-
-  WAIT_ATTEMPTS="$POLL_ATTEMPTS"
-  if [ "$CONFLICT" = "1" ]; then WAIT_ATTEMPTS=$((POLL_ATTEMPTS * 2)); fi
-  if wait_public "NPM_TOKEN" "$WAIT_ATTEMPTS"; then
-    set_output method "NPM_TOKEN"
-    exit 0
-  fi
-  info "token 发布同样没有让版本在等待窗口内公开"
+  if try_method token "token 发布" "NPM_TOKEN"; then exit 0; fi
+  info "token 发布同样没有让版本在等待窗口内可见"
 else
   info "没有 NODE_AUTH_TOKEN（仓库 Secret NPM_TOKEN 未配置），跳过 token 兜底"
 fi
@@ -227,16 +254,28 @@ if [ "$CONFLICT" = "1" ]; then
   fi
 fi
 
-# ---------- 3) 失败 + 诊断 ----------
+# ---------- 3) 收尾 ----------
+# 实测（0.6.4 / 0.6.5 两次 tag 发布）：npm publish 返回 0 后，registry 要先做完自动校验
+# （status 端点显示 "validating"，`npm stage list` 为空，不需要人工 2FA），1~3 分钟后版本才可读。
+# 所以「窗口内没读到公开版本」不再让流水线失败——只提醒，GitHub Release 照常产出。
+if [ "$ACCEPTED" = "1" ]; then
+  log "发布请求已被 registry 接受，等待窗口内还没读到公开版本 —— 不阻断发布流程"
+  info "npm 正在后台完成自动校验，通常几分钟内可见；稍后可用以下命令确认："
+  info "  npm view $SPEC version"
+  probe_version_status
+  set_output method "publish accepted (visibility pending)"
+  exit 0
+fi
+
+# ---------- 真失败：没有任何一次发布被 registry 接受 ----------
 diagnose
 cat <<'EOF'
 
-::error title=Version not public::npm 接受了发布请求，但版本始终没有在 registry 上公开。请按顺序排查：
-  1) npm 网页 → 包页面 → Staged Packages：若有本次版本，点 Approve（需要 2FA）。stage-only 策略与
-     「包首次发布」都会走这条路，CI 无法代替人工 2FA。
-  2) 包首次发布时，先在本地 `npm login && npm publish --access public` 走一次（或 `npm stage publish`），
-     让包名在 registry 上存在；之后再去 npm 包设置里登记 Trusted Publisher（repo + release.yml）。
-  3) 确认仓库 Secret NPM_TOKEN 是**可发布**的 granular token（不能是 stage-only / read-only，且 allowed
-     packages 包含本包），并确认上面的「诊断」里 whoami 能识别到正确账号。
+::error title=Publish rejected::所有发布方式都没有被 registry 接受（不是「等待可见性」的问题）。请按顺序排查：
+  1) 上面的「诊断」里看 token 身份（whoami）是否是期望账号；
+  2) 仓库 Secret NPM_TOKEN 必须是**可发布**的 granular token（不能是 stage-only / read-only，
+     allowed packages 要包含本包）；本地验证：npm login && npm publish --access public --dry-run；
+  3) 若想让 OIDC（Trusted Publishing）生效，需在 npm 包设置里登记 Trusted Publisher：
+     repo + workflow 文件名 release.yml。
 EOF
 exit 1

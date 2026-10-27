@@ -4,13 +4,11 @@
 
 **发布流水线修复，插件运行时行为无变化。**
 
-- **真因：不是发布失败，是读得太早。** 旧流程 `npm publish` 成功后只轮询 30s 就判「版本没公开」；实测本账号发布后 registry 读路径（CDN）要 **60~180s** 才可见，于是 0.6.4、0.6.5 两次 tag 发布都在这步阵亡，而两个版本其实都发布成功了（0.6.4 于 05:18、0.6.5 于 05:44 落到 registry，均带 provenance）。
-- **发布逻辑抽成 `scripts/publish-npm.sh`**：每次尝试都是「发布 → 轮询确认可见」，默认窗口 18×10s；除 `npm view` 外还带 cache-buster 请求精确版本端点（`/<name>/<version>?ts=…`），命中 200 即认为已公开，不必等 packument 缓存过期。
-- **token 兜底真正生效**：OIDC（Trusted Publishing）发布后版本仍未可见时，自动回退 `NPM_TOKEN` 再发一次并同样确认；`--provenance` 因缺 OIDC 权限单独失败时自动去掉该参数重试。
-- **不再重复发布**：registry 回「You cannot publish over the previously published versions」（E403/E409）说明版本其实已发出，此时不再换 token 重发，只延长等待（最多再 2 倍窗口）。
-- **失败时自带诊断**：打印 npm / node 版本、`NPM_TOKEN` 对应账号、registry 该版本的 status 端点、`npm stage list`（npm ≥ 11.15）与发布日志报错行，并给出处置建议（Approve staged / 本地首次发布 / 换可发布 granular token）。
-- **凭据探测步骤**：发布前输出 `npm whoami` 与 OIDC 是否可用（`ACTIONS_ID_TOKEN_REQUEST_URL`），缺 `NPM_TOKEN` 时给 warning 而不是静默降级。
-- **新增单测** `test/publish-npm.test.js`（7 项，用假 npm）：已公开跳过、无凭据直接诊断、OIDC 一次成功、OIDC 假成功→token 救回、provenance 失败自动重试、冲突后不重复发布、两条路都失败给出 staged 建议。`npm run check` 现在共 35 项。
+- **真因：发布成功 ≠ 立刻可读。** `npm publish` 返回 0 后，registry 要先跑完**自动校验**（带 token 查版本状态端点可见 `{"status":"validating"}`；`npm stage list` 为空，**不需要人工 2FA**），实测 1~3 分钟后版本才可读。旧流程只轮询 30s 就判「版本没公开」并让整个 Release 失败——而 0.6.4 / 0.6.5 两个版本其实都发布成功了（分别于 05:18 / 05:44 落到 registry，均带 provenance）。
+- **可见性确认不再阻断发布**：`scripts/publish-npm.sh` 每次尝试仍是「发布 → 轮询确认可见」（默认窗口 18×10s，另用带 cache-buster 的精确版本端点提前确认），但只要发布请求被 registry **接受**，即使窗口内没读到公开版本也**只提醒、不失败**，GitHub Release 照常产出；只有所有方式都被 registry **拒绝**（认证/权限问题）才判失败并打印诊断（whoami / 版本状态 / stage list / npm 报错原文）。
+- **token 兜底真正生效**：OIDC（Trusted Publishing）当前对该包返回 `ENEEDAUTH`（npm 包设置里还没登记 Trusted Publisher），日志会提示去登记；登记前由 `NPM_TOKEN` 完成发布。`--provenance` 单独失败时自动去掉该参数重试。
+- **不重复发布**：registry 回「You cannot publish over the previously published versions」（E403/E409）说明版本其实已发出，不再换方式重发、只延长等待；发布被拒时也不再空等，立刻换下一种方式。
+- **新增单测** `test/publish-npm.test.js`（8 项，用假 npm）：已公开跳过、无凭据诊断、OIDC 一次成功、OIDC 假成功→token 救回、provenance 自动降级、OIDC 被拒不空等、冲突不重发、发出但未可见不失败。`npm run check` 现在共 36 项。
 
 ## 0.6.4
 
