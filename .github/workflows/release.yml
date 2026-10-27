@@ -3,7 +3,7 @@ name: Release
 
 # 打 tag 或手动触发时执行完整发布：
 #   · 校验 tag ↔ package.json 版本一致
-#   · 运行仓库自检（34 项单测 + 离线冒烟 + 包清单 / bundle 契约）
+#   · 运行仓库自检（35 项单测 + 离线冒烟 + 包清单 / bundle 契约）
 #   · 发布 npm：优先 Trusted Publishing（OIDC，无需 token），**未真正公开**时回退 NPM_TOKEN
 #     —— 每种方式都「发布 + 轮询确认版本已在 registry 可见」，不只看 npm publish 的退出码
 #   · 校验版本确实已公开，再打包 tarball + SHA-256、生成完整发布说明并创建/更新 Release
@@ -118,8 +118,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
-          POLL_ATTEMPTS: '10'
-          POLL_INTERVAL: '6'
+          POLL_ATTEMPTS: '18'
+          POLL_INTERVAL: '10'
         run: bash scripts/publish-npm.sh
 
       # ============ 打包与校验和 ============

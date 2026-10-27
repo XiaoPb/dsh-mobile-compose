@@ -23,6 +23,11 @@ case "$cmd" in
   whoami) echo "fake-user"; exit 0 ;;
   stage) echo "(fake) staged packages: none"; exit 0 ;;
   publish)
+    if [ "\${FAKE_CONFLICT:-}" = "1" ]; then
+      echo "npm error code E403" >&2
+      echo "npm error 403 You cannot publish over the previously published versions: 0.6.5." >&2
+      exit 1
+    fi
     case " $* " in
       *" --provenance "*)
         if [ "\${FAKE_PROVENANCE_RC:-0}" != "0" ]; then
@@ -143,6 +148,18 @@ test('publish-npm: provenance 失败时自动去掉 --provenance 重试', { skip
   assert.equal(publishes.length, 2, publishes.join(' | '));
   assert.match(publishes[0], /--provenance/);
   assert.doesNotMatch(publishes[1], /--provenance/);
+});
+
+test('publish-npm: registry 回「已存在该版本」→ 不再换方式重发，只等刷新', { skip: !hasBash && 'bash 不可用' }, () => {
+  const res = runPublish({
+    ACTIONS_ID_TOKEN_REQUEST_URL: 'https://example.invalid/token',
+    NODE_AUTH_TOKEN: 'npm_faketoken',
+    FAKE_CONFLICT: '1',
+  });
+  assert.equal(res.status, 1, res.stdout);
+  const publishes = res.calls.filter((c) => c.startsWith('publish '));
+  assert.equal(publishes.length, 1, `冲突后不该再用 token 重发：${publishes.join(' | ')}`);
+  assert.match(res.stdout, /已存在该版本/);
 });
 
 test('publish-npm: 两条路都没公开 → 失败并给出 staged 处置建议', { skip: !hasBash && 'bash 不可用' }, () => {

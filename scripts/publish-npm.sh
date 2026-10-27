@@ -29,11 +29,13 @@ VERSION="${VERSION:-$(node -p "require('./package.json').version")}"
 REGISTRY="${REGISTRY:-https://registry.npmjs.org/}"
 REGISTRY="${REGISTRY%/}"
 REG_HOST="${REGISTRY#*://}"
-POLL_ATTEMPTS="${POLL_ATTEMPTS:-10}"
-POLL_INTERVAL="${POLL_INTERVAL:-6}"
+POLL_ATTEMPTS="${POLL_ATTEMPTS:-18}"
+POLL_INTERVAL="${POLL_INTERVAL:-10}"
 SPEC="${PACKAGE_NAME}@${VERSION}"
 WORKDIR="${WORKDIR:-$(mktemp -d)}"
 mkdir -p "$WORKDIR"
+NAME_ENCODED="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$PACKAGE_NAME")"
+VERSION_URL="${REGISTRY}/${NAME_ENCODED}/${VERSION}"
 
 log() { printf '\n==> %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
@@ -46,21 +48,35 @@ set_output() { # key value
 }
 
 # ---------- 版本是否已公开 ----------
+# npm 的读路径走 CDN 缓存：publish 成功后 packument 可能还要 1~3 分钟才可见（实测 0.6.4 / 0.6.5 都是
+# 60~180s）。所以除了 npm view，再用带 cache-buster 的精确版本端点探一次，命中 200 就认为已公开。
 is_public() {
-  npm view "$SPEC" version --registry "$REGISTRY" > /dev/null 2>&1
+  if npm view "$SPEC" version --registry "$REGISTRY" > /dev/null 2>&1; then
+    return 0
+  fi
+  if [ "${PROBE_REGISTRY:-1}" != "0" ]; then
+    local code
+    code="$(curl -s -o /dev/null -m 15 -w '%{http_code}' -H 'Cache-Control: no-cache' \
+      "${VERSION_URL}?ts=$(date +%s)" 2>/dev/null || true)"
+    if [ "$code" = "200" ]; then
+      info "（精确版本端点已返回 200，packument 还在 CDN 缓存里）"
+      return 0
+    fi
+  fi
+  return 1
 }
 
-wait_public() { # $1 = 方式标签；成功 0，超时 1
-  local label="$1" attempt raw
-  for ((attempt = 1; attempt <= POLL_ATTEMPTS; attempt++)); do
+wait_public() { # $1 = 方式标签，$2 = 轮询次数（可选）；成功 0，超时 1
+  local label="$1" attempts="${2:-$POLL_ATTEMPTS}" attempt raw
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
     if is_public; then
       info "第 $attempt 次确认：$SPEC 已公开（$label）"
       return 0
     fi
     raw="$(npm view "$SPEC" version --registry "$REGISTRY" 2>&1 || true)"
     raw="$(printf '%s' "$raw" | head -n 2 | tr '\n' ' ')"
-    info "第 $attempt/$POLL_ATTEMPTS 次确认：尚未公开 · ${raw:-（无输出）}"
-    if [ "$attempt" -lt "$POLL_ATTEMPTS" ]; then sleep "$POLL_INTERVAL"; fi
+    info "第 $attempt/$attempts 次确认：尚未公开 · ${raw:-（无输出）}"
+    if [ "$attempt" -lt "$attempts" ]; then sleep "$POLL_INTERVAL"; fi
   done
   return 1
 }
@@ -94,6 +110,29 @@ publish_once() { # $1 = trusted|token，$2 = 1 带 provenance / 0 不带
 }
 
 grep_log() { grep -Eiq "$1" "${2:-$PUB_LOG}" 2>/dev/null; }
+
+# registry 回「版本已存在」= 这次其实已经发出去了，只是读路径还没刷新；不用再换方式重发。
+is_conflict() {
+  grep_log 'previously published|EPUBLISHCONFLICT|E409|409 Conflict'
+}
+
+# 发布一次，必要时去掉 --provenance 重试。返回：0 正常发出 / 2 命中「已存在」
+attempt_publish() { # $1 = trusted|token，$2 = 说明文字
+  publish_once "$1" 1
+  if is_conflict; then
+    info "$2：registry 已存在该版本（$SPEC），只是读路径还没刷新"
+    return 2
+  fi
+  if [ "$PUB_RC" -ne 0 ] && grep_log 'provenance|sigstore|id-token|oidc'; then
+    info "provenance 相关失败，去掉 --provenance 重试"
+    publish_once "$1" 0
+    if is_conflict; then
+      info "$2：registry 已存在该版本（$SPEC），只是读路径还没刷新"
+      return 2
+    fi
+  fi
+  return 0
+}
 
 # ---------- 诊断 ----------
 diagnose() {
@@ -143,36 +182,49 @@ if is_public; then
 fi
 
 # ---------- 1) Trusted Publishing (OIDC) ----------
+CONFLICT=0
 if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-  publish_once trusted 1
-  # provenance 在缺 OIDC 权限/registry 不支持时会单独失败，去掉 provenance 再试一次
-  if [ "$PUB_RC" -ne 0 ] && grep_log 'provenance|sigstore|id-token|oidc'; then
-    info "provenance 相关失败，去掉 --provenance 重试可信发布"
-    publish_once trusted 0
-  fi
-  if wait_public "trusted publishing"; then
+  ATTEMPT_RC=0
+  attempt_publish trusted "可信发布" || ATTEMPT_RC=$?
+  if [ "$ATTEMPT_RC" = "2" ]; then CONFLICT=1; fi
+
+  WAIT_ATTEMPTS="$POLL_ATTEMPTS"
+  if [ "$CONFLICT" = "1" ]; then WAIT_ATTEMPTS=$((POLL_ATTEMPTS * 2)); fi
+  if wait_public "trusted publishing" "$WAIT_ATTEMPTS"; then
     set_output method "trusted publishing (OIDC)"
     exit 0
   fi
-  info "可信发布没有让版本公开（常见原因：该包还没登记 Trusted Publisher、或账号是 stage-only 策略）"
+  info "可信发布没有让版本在等待窗口内公开（包未登记 Trusted Publisher / OIDC 被拒 / registry 还在刷新）"
 else
   info "没有 OIDC 上下文（ACTIONS_ID_TOKEN_REQUEST_URL 缺失），跳过可信发布"
 fi
 
 # ---------- 2) NPM_TOKEN 兜底 ----------
-if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
-  publish_once token 1
-  if [ "$PUB_RC" -ne 0 ] && grep_log 'provenance|sigstore|id-token|oidc'; then
-    info "provenance 相关失败，去掉 --provenance 重试 token 发布"
-    publish_once token 0
-  fi
-  if wait_public "NPM_TOKEN"; then
+if [ "$CONFLICT" = "1" ]; then
+  info "registry 已收录 $SPEC，token 兜底重发没有意义，跳过"
+elif [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+  ATTEMPT_RC=0
+  attempt_publish token "token 发布" || ATTEMPT_RC=$?
+  if [ "$ATTEMPT_RC" = "2" ]; then CONFLICT=1; fi
+
+  WAIT_ATTEMPTS="$POLL_ATTEMPTS"
+  if [ "$CONFLICT" = "1" ]; then WAIT_ATTEMPTS=$((POLL_ATTEMPTS * 2)); fi
+  if wait_public "NPM_TOKEN" "$WAIT_ATTEMPTS"; then
     set_output method "NPM_TOKEN"
     exit 0
   fi
-  info "token 发布同样没有让版本公开"
+  info "token 发布同样没有让版本在等待窗口内公开"
 else
   info "没有 NODE_AUTH_TOKEN（仓库 Secret NPM_TOKEN 未配置），跳过 token 兜底"
+fi
+
+# 两种方式都试过：最后再给 registry 一段纯等待（CDN 刷新可能慢到几分钟）
+if [ "$CONFLICT" = "1" ]; then
+  log "两种方式都已把版本发出去，最后再等一轮 registry 刷新"
+  if wait_public "最终确认" $((POLL_ATTEMPTS * 2)); then
+    set_output method "published (registry 刷新后确认)"
+    exit 0
+  fi
 fi
 
 # ---------- 3) 失败 + 诊断 ----------

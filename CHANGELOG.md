@@ -4,11 +4,13 @@
 
 **发布流水线修复，插件运行时行为无变化。**
 
-- **修复「npm 接受了请求但版本没公开」被当成成功**：原 release 工作流只看 `npm publish` 的退出码，而账号处于 stage-only 策略、或包首次发布时，npm 会返回 0 但版本进入 Staged Packages 等人工 2FA 批准，于是流程跑到「确认公开」才失败、前面全部步骤看起来都是绿的（0.6.4 的 tag 发布即卡在这里）。现在发布逻辑抽成 `scripts/publish-npm.sh`：**每种方式都是「发布 → 轮询 `npm view` 确认真实可见」**，确认不到才算失败。
-- **token 兜底真正生效**：OIDC（Trusted Publishing）发布后若版本仍未公开，自动回退 `NPM_TOKEN` 再发一次并同样确认；`--provenance` 因缺少 OIDC 权限失败时自动去掉该参数重试。两种方式都失败才报错。
-- **失败时自带诊断**：打印 npm / node 版本、`NPM_TOKEN` 对应账号、registry 上该版本的 status 端点、`npm stage list`（npm ≥ 11.15）与发布日志里的报错行，并在错误信息里给出三条处置建议（先 Approve staged 版本 / 先本地发一次让包名存在 / 换可发布的 granular token）。
-- **凭据探测步骤**：发布前先输出 `npm whoami` 与 OIDC 是否可用（`ACTIONS_ID_TOKEN_REQUEST_URL`），缺 `NPM_TOKEN` 时给 warning 而不是静默降级。
-- **新增单测** `test/publish-npm.test.js`（6 项，用假 npm）：已公开跳过、无凭据直接诊断、OIDC 一次成功、OIDC 假成功→token 救回、provenance 失败自动重试、两条路都失败给出 staged 建议。`npm run check` 现在共 34 项。
+- **真因：不是发布失败，是读得太早。** 旧流程 `npm publish` 成功后只轮询 30s 就判「版本没公开」；实测本账号发布后 registry 读路径（CDN）要 **60~180s** 才可见，于是 0.6.4、0.6.5 两次 tag 发布都在这步阵亡，而两个版本其实都发布成功了（0.6.4 于 05:18、0.6.5 于 05:44 落到 registry，均带 provenance）。
+- **发布逻辑抽成 `scripts/publish-npm.sh`**：每次尝试都是「发布 → 轮询确认可见」，默认窗口 18×10s；除 `npm view` 外还带 cache-buster 请求精确版本端点（`/<name>/<version>?ts=…`），命中 200 即认为已公开，不必等 packument 缓存过期。
+- **token 兜底真正生效**：OIDC（Trusted Publishing）发布后版本仍未可见时，自动回退 `NPM_TOKEN` 再发一次并同样确认；`--provenance` 因缺 OIDC 权限单独失败时自动去掉该参数重试。
+- **不再重复发布**：registry 回「You cannot publish over the previously published versions」（E403/E409）说明版本其实已发出，此时不再换 token 重发，只延长等待（最多再 2 倍窗口）。
+- **失败时自带诊断**：打印 npm / node 版本、`NPM_TOKEN` 对应账号、registry 该版本的 status 端点、`npm stage list`（npm ≥ 11.15）与发布日志报错行，并给出处置建议（Approve staged / 本地首次发布 / 换可发布 granular token）。
+- **凭据探测步骤**：发布前输出 `npm whoami` 与 OIDC 是否可用（`ACTIONS_ID_TOKEN_REQUEST_URL`），缺 `NPM_TOKEN` 时给 warning 而不是静默降级。
+- **新增单测** `test/publish-npm.test.js`（7 项，用假 npm）：已公开跳过、无凭据直接诊断、OIDC 一次成功、OIDC 假成功→token 救回、provenance 失败自动重试、冲突后不重复发布、两条路都失败给出 staged 建议。`npm run check` 现在共 35 项。
 
 ## 0.6.4
 
