@@ -276,15 +276,17 @@ test('client bundle：加载契约 + apply 接线 + 渲染交互 + 指令接管 
   await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
   assert.ok(document.querySelector('.dmc-tile[data-dmc-action="pick-image"]'), '重开默认在常用 tab')
 
-  // ---- ④ 底部面板形态（手机宽度） ----
+  // ---- ④ 窄窗口：统一 dock 形态（所有宽度一致，不再有底部面板） ----
   // jsdom 的 innerWidth 是原型 getter，直接赋值无效，用 defineProperty 覆盖。
   await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) }) // 先收起当前开着的面板
   Object.defineProperty(window, 'innerWidth', { value: 500, configurable: true })
   await act(async () => { entry.dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
-  assert.ok(document.querySelector('.dmc-mask'), '窄窗口出现蒙层')
-  assert.ok(document.querySelector('.dmc-panel'), '底部面板形态在场')
-  await act(async () => { document.querySelector('.dmc-mask').dispatchEvent(new window.MouseEvent('click', { bubbles: true })) })
-  assert.ok(document.querySelector('.dmc-panel') === null, '蒙层点击关闭')
+  const dockNarrow = document.querySelector('.dmc-dock')
+  assert.ok(dockNarrow, '窄窗口同样是 dock 形态（插在输入框正下方）')
+  assert.ok(document.querySelector('.dmc-mask') === null && document.querySelector('.dmc-panel') === null, '蒙层/底部面板已移除')
+  assert.ok(/^\d+(\.\d+)?px$/.test(dockNarrow.style.width || ''), '窄窗口下宽度仍按输入框实测')
+  await act(async () => { document.body.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true })) })
+  assert.ok(document.querySelector('.dmc-dock') === null, '窄窗口点击面板外关闭')
   Object.defineProperty(window, 'innerWidth', { value: 1024, configurable: true })
 
   // ---- ⑤ 卸载清理 ----

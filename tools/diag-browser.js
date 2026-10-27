@@ -88,18 +88,31 @@ async function main() {
     await plus.click()
     await page.waitForTimeout(300)
 
-    // ---- ⑤ 手机宽度 → 底部面板 ----
+    // ---- ⑤ 窄窗口：统一 dock 形态（与桌面完全一致，插在输入框下方） ----
     await page.setViewportSize({ width: 480, height: 860 })
     await page.waitForTimeout(500)
     await plus.click()
     await page.waitForTimeout(700)
-    const sheet = await page.evaluate(() => ({ mask: !!document.querySelector('.dmc-mask'), panel: !!document.querySelector('.dmc-panel'), tiles: document.querySelectorAll('.dmc-panel .dmc-tile').length }))
-    if (!sheet.mask || !sheet.panel) throw new Error('FAIL ⑤ 窄窗口底部面板未出现: ' + JSON.stringify(sheet))
-    logs.push(`PASS ⑤ 底部面板 tiles=${sheet.tiles}`)
-    await page.screenshot({ path: 'tools/accept-sheet.png' })
-    await page.locator('.dmc-mask').click({ position: { x: 10, y: 10 } })
+    const narrow = await page.evaluate(() => {
+      const dock = document.querySelector('.dmc-dock')
+      const card = document.querySelector('[data-composer-card]')
+      return {
+        dock: !!dock,
+        stale: !!document.querySelector('.dmc-mask') || !!document.querySelector('.dmc-panel'),
+        width: dock ? +dock.getBoundingClientRect().width.toFixed(1) : null,
+        composer: card ? +card.getBoundingClientRect().width.toFixed(1) : null,
+        tiles: document.querySelectorAll('.dmc-dock .dmc-tile').length,
+      }
+    })
+    if (!narrow.dock || narrow.stale) throw new Error('FAIL ⑤ 窄窗口未用 dock 形态: ' + JSON.stringify(narrow))
+    if (narrow.composer !== null && Math.abs(narrow.width - narrow.composer) > 1) {
+      throw new Error(`FAIL ⑤ 窄窗口面板未与输入框等宽: panel=${narrow.width} composer=${narrow.composer}`)
+    }
+    logs.push(`PASS ⑤ 窄窗口 dock 形态 width=${narrow.width} composer=${narrow.composer}（等宽） tiles=${narrow.tiles}`)
+    await page.screenshot({ path: 'tools/accept-narrow.png' })
+    await page.evaluate(() => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
     await page.waitForTimeout(400)
-    logs.push(`PASS ⑤ 蒙层点击关闭=${await page.evaluate(() => !document.querySelector('.dmc-panel'))}`)
+    logs.push(`PASS ⑤ 窄窗口点击面板外关闭=${await page.evaluate(() => !document.querySelector('.dmc-dock'))}`)
 
     console.log(logs.join('\n'))
     console.log('ACCEPTANCE: ALL PASS')

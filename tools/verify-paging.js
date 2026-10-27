@@ -46,9 +46,9 @@ async function mobile(browser) {
   page.on('pageerror', (e) => errs.push(String(e).slice(0, 160)))
   await openPanel(page)
   const s0 = await read(page)
-  if (s0.kind !== 'sheet') throw new Error(`移动端期望 sheet 形态，实为 ${s0.kind}`)
+  if (s0.kind !== 'dock') throw new Error(`移动端期望 dock 形态（与桌面一致），实为 ${s0.kind}`)
   const box = await page.evaluate(() => {
-    const r = document.querySelector('.dmc-panel').getBoundingClientRect()
+    const r = document.querySelector('.dmc-dock').getBoundingClientRect()
     return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 }
   })
   const cdp = await ctx.newCDPSession(page)
